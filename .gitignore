@@ -1,0 +1,8 @@
+/result
+/result-*
+
+# Cachés de Python y restos de parches.
+__pycache__/
+*.py[cod]
+*.orig
+*.rej
