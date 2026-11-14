@@ -1,0 +1,14 @@
+{
+  "name": "Living Code Paper",
+  "bg": "#f4f7f9",
+  "surface": "#e3e9ed",
+  "border": "#d2d8dd",
+  "dim": "#6b7378",
+  "text": "#12171a",
+  "accent": "#187d6e",
+  "working": "#187d6e",
+  "proposal": "#0f695e",
+  "focus": "#2b6991",
+  "attention": "#8f6213",
+  "critical": "#a74541"
+}

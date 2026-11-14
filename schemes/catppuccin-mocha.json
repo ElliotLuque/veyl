@@ -1,0 +1,19 @@
+{
+  "name": "Catppuccin Mocha",
+  "bg": "#1e1e2e",
+  "surface": "#313244",
+  "border": "#45475a",
+  "dim": "#7f849c",
+  "text": "#cdd6f4",
+  "accent": "#cba6f7",
+  "working": "#94e2d5",
+  "proposal": "#89dceb",
+  "focus": "#b4befe",
+  "attention": "#f9e2af",
+  "critical": "#f38ba8",
+  "anthropic": "#fab387",
+  "openai": "#a6e3a1",
+  "google": "#89b4fa",
+  "github": "#cba6f7",
+  "done": "#a6e3a1"
+}

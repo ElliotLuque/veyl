@@ -1,0 +1,19 @@
+{
+  "name": "Living Code Night",
+  "bg": "#05080b",
+  "surface": "#12171a",
+  "border": "#1d2226",
+  "dim": "#747c80",
+  "text": "#e2e9ee",
+  "accent": "#00a692",
+  "working": "#00a692",
+  "proposal": "#52d7c1",
+  "focus": "#80b6d3",
+  "attention": "#f0be6d",
+  "critical": "#e96560",
+  "anthropic": "#d97757",
+  "openai": "#10a37f",
+  "google": "#5b8def",
+  "github": "#9b7cf0",
+  "done": "#5fc77e"
+}

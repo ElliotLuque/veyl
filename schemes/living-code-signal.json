@@ -1,0 +1,14 @@
+{
+  "name": "Living Code Signal",
+  "bg": "#05080b",
+  "surface": "#12171a",
+  "border": "#1d2226",
+  "dim": "#747c80",
+  "text": "#e2e9ee",
+  "accent": "#00a692",
+  "working": "#00a692",
+  "proposal": "#00a692",
+  "focus": "#c8cfd4",
+  "attention": "#e2e9ee",
+  "critical": "#e2e9ee"
+}

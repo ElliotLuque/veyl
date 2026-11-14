@@ -1,0 +1,14 @@
+{
+  "name": "Living Code Frost",
+  "bg": "#0a1016",
+  "surface": "#171e24",
+  "border": "#232a30",
+  "dim": "#7d8489",
+  "text": "#e2e9ee",
+  "accent": "#43a997",
+  "working": "#43a997",
+  "proposal": "#8ad5c6",
+  "focus": "#98bacd",
+  "attention": "#e9c897",
+  "critical": "#d68079"
+}
