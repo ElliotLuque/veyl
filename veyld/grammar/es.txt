@@ -1,0 +1,390 @@
+# La gramática de Veyl: lo que entiende sin preguntar a un modelo.
+#
+#   patrón  =>  intención clave=valor…
+#
+# (a|b) es una de las dos; [a|b], lo mismo pero opcional; <nombre:tipo>, un
+# hueco: num, pct (porcentaje), ord (ordinal), dur (duración), when
+# (cuándo), word (una palabra) o text (lo que sea). Sin tildes ni mayúsculas:
+# «música» y «musica» son lo mismo. De las reglas que casan con todo lo
+# dicho gana la que más palabras nombra; a igualdad, la de más arriba.
+#
+# Lo que no es la orden se quita antes: `filler` en cualquier sitio («por
+# favor»), `lead` solo al principio («dime», «¿sabes…?») y `tail` solo al
+# final («si puedes»).
+#
+# Para añadir frases sin tocar esto: ~/.config/veyl/grammar.txt, con el
+# mismo formato. Sus reglas se suman a estas.
+
+# Formas de un mismo verbo, y sinónimos: lo de la derecha se lee como lo de
+# la izquierda.
+alias sube = subir | subes | subas | suba | suben | súbele | súbelo | súbeme | aumenta | aumentar | aumentas | incrementa | incrementar
+alias baja = bajar | bajes | bajas | baje | bajan | bájale | bájalo | bájame | disminuye | disminuir | reduce | reducir | reduces
+alias pon = poner | pones | pongas | ponga | ponme | ponlo | ponle | pónmelo | pónla | ponla
+alias quita = quitar | quitas | quites | quite | quítame | quítalo | quítale | quítala
+alias abre = abrir | abres | abras | abra | ábreme | ábrelo | lanza | lanzar | arranca | arrancar | inicia | iniciar | ejecuta | ejecutar
+alias cierra = cerrar | cierras | cierres | cierre | ciérrame | ciérralo | ciérrala
+alias cambia = cambiar | cambias | cambies | cambie | cámbiame | cámbialo | cámbiala
+alias pasa = pasar | pásalo | pásala | pásame | pasas | pases
+alias ve = ir | vete | vayas | vaya | llévame | llevarme | vamos | vámonos | enfoca | enfocar
+alias muestra = mostrar | muéstrame | enseña | enséñame | enseñar | trae | tráeme | traer
+alias enciende = encender | enciendes | enciendas | encienda | prende | prender | conecta | conectar
+alias apaga = apagar | apagas | apagues | apague | apágalo | apágala | desconecta | desconectar
+alias activa = activar | activas | actives | active | actívame | actívalo | actívala
+alias desactiva = desactivar | desactivas | desactives | desactive | desactívalo | desactívala
+alias silencia = silenciar | silencias | silencies | silencie | silencíalo | mutea | mutear | enmudece
+alias mueve = mover | mueves | muevas | mueva | muévela | muévelo | lleva | llévate | llévala | llevar | manda | mándala | mándalo | mandar | envía | envíala | enviar
+alias bloquea = bloquear | bloqueas | bloquees | bloquee
+alias suspende = suspender | suspendes | suspendas | suspenda
+alias reinicia = reiniciar | reinicias | reinicies | reinicie | recarga | recargar | recargas
+alias para = parar | paras | pares | pare | detén | detener | detenga
+alias pausa = pausar | pausas | pauses | pause
+alias reproduce = reproducir | reproduzcas | reanuda | reanudar | continúa | continuar | sigue | seguir
+alias haz = hacer | haces | hagas | haga | hazme | saca | sácame | sacar | toma | tómame | tomar
+alias apunta = apuntar | apuntas | apuntes | apunte | apúntame | anota | anotar | anótame | agenda | agendar
+alias recuerda = recordar | recuérdame | recuerdas | recuerdes | recuerde | avisa | avísame | avisar
+alias maximiza = maximizar | maximízala | maximízalo
+alias micro = micrófono | micrófonos | mic
+alias wifi = wi fi | wireless | guifi
+alias bluetooth = blutú | blutuz | bluetuz | bt
+alias volumen = vol | volume
+alias temporizador = timer | cronómetro | cuenta atrás
+alias captura = pantallazo | screenshot
+alias nivel = escritorio | espacio de trabajo | espacio | workspace
+alias ordenador = equipo | pc | computador | computadora | máquina | portátil | compu
+alias siguiente = próxima | próximo
+alias anterior = previa | previo
+
+# Lo que se dice por cortesía o para empezar; se quita antes de leer.
+filler por favor | porfa | porfavor | oye | hey | eh | veyl | gracias | a ver | anda | venga | me | puedes | podrías | quieres | quiero que | necesito que | haz el favor de | sería posible
+# Así oye Whisper a veces «Veyl».
+filler bail | vail | veil | beil | weil | beyl | vayl | bayl | veile
+
+# Lo que envuelve una pregunta u orden, al principio (lead) o al final (tail):
+# en medio de la frase no se quita, que puede ser lo dicho («apunta decir hola a Ana»).
+lead dime | dímelo | decir | decirme | dices | me dices | me dirías | dirías | sabes | sabrías | sabrías decirme | sabes decirme | puedes decirme | me puedes decir | podrías decirme | me podrías decir | quiero saber | me gustaría saber | una pregunta | pregunta | perdona | perdón | disculpa | hola | buenas | buenos días | buenas tardes | buenas noches | escucha | mira | bueno | vale | ok | okey
+tail si puedes | cuando puedas | si no te importa | gracias | anda
+
+# --- Sonido -----------------------------------------------------------------
+[pon|sube|baja|cambia|deja|ajusta] [el] (volumen|sonido|audio) [a|al|en|hasta] <n:pct>      => volume.set
+(volumen|sonido) [a|al] <n:pct>                                                            => volume.set
+[pon|sube] [el] (volumen|sonido) (a tope|al máximo)                                        => volume.set n=100
+sube [un poco|un poquito|un pelín] [el] (volumen|sonido|audio) [un poco|un poquito] [un|en] [<n:pct>]  => volume.up
+baja [un poco|un poquito|un pelín] [el] (volumen|sonido|audio) [un poco|un poquito] [un|en] [<n:pct>]  => volume.down
+(más alto|más volumen|más fuerte)                                                          => volume.up
+(más bajo|menos volumen|más flojo)                                                         => volume.down
+(silencia|quita|apaga) [el] (sonido|volumen|audio|altavoz|altavoces)                       => volume.mute on=true
+(silencio|calla|cállate|mute)                                                              => volume.mute on=true
+(quita|desactiva) el silencio                                                              => volume.mute on=false
+(activa|pon|enciende) [el] (sonido|audio|altavoz|altavoces)                                => volume.mute on=false
+
+(silencia|apaga|desactiva|cierra|quita) [el] micro                                         => mic.mute on=true
+(activa|enciende|abre|pon) [el] micro                                                      => mic.mute on=false
+(quita|desactiva) el silencio del micro                                                    => mic.mute on=false
+[pon|sube|baja|cambia|deja|ajusta] [el] [volumen del] micro (a|al|en|hasta) <n:pct>        => mic.set
+sube [un poco] [el] [volumen del] micro [un poco] [un|en] [<n:pct>]                        => mic.up
+baja [un poco] [el] [volumen del] micro [un poco] [un|en] [<n:pct>]                        => mic.down
+
+# --- Lo que suena -------------------------------------------------------------
+pausa [la|el] [música|canción|vídeo|video|reproducción]                                    => media.pause
+para [la|el] [música|canción|vídeo|video|reproducción]                                     => media.pause
+(reproduce|pon|play) [la|el] [música|canción|vídeo|video]                                  => media.play
+(dale|vale) al play                                                                       => media.play
+(siguiente|otra) [canción|pista|tema]                                                      => media.next
+(la|el) siguiente (canción|pista|tema)                                                     => media.next
+(canción|pista|tema) siguiente                                                             => media.next
+(pasa|salta) [de|a la siguiente|la] [canción|pista|tema]                                   => media.next
+anterior (canción|pista|tema)                                                              => media.previous
+[la|el] (canción|pista|tema) anterior                                                      => media.previous
+vuelve a la anterior [canción|pista]                                                       => media.previous
+qué (suena|está sonando|canción es esta|canción es|tema es este|es esto)                   => media.what
+
+# --- Ventanas y aplicaciones --------------------------------------------------
+(ve|cambia|pasa|salta|muestra) [a|al|a la|a el] [ventana de|ventana del|ventana de la] <app:text>  => window.focus
+abre [el|la|los|las|un|una] [nueva|nuevo|otra|otro] [ventana de|ventana del] <app:text>    => app.open
+cierra [esta|la|esa] (ventana|esto|eso)                                                    => window.close
+cierra                                                                                     => window.close
+quita (esta|la|esa) ventana                                                                => window.close
+cierra <app:text>                                                                          => window.close
+[pon|haz] [la ventana|esto|esta ventana] [en|a] [la] pantalla completa                     => window.fullscreen mode=fullscreen on=true
+(pon|haz) <app:text> (en|a) pantalla completa                                              => window.fullscreen mode=fullscreen on=true
+(quita|sal de) [la] pantalla completa                                                      => window.fullscreen mode=fullscreen on=false
+quita [la] pantalla completa (a|de) <app:text>                                             => window.fullscreen mode=fullscreen on=false
+maximiza [la ventana|esto|esta ventana]                                                    => window.fullscreen mode=maximized on=true
+maximiza <app:text>                                                                        => window.fullscreen mode=maximized on=true
+[pon|haz] [la ventana|esto|esta ventana] flotante                                          => window.float
+flota [la ventana|esto|esta ventana]                                                       => window.float
+[ve a] [la] ventana (de la izquierda|izquierda|anterior)                                   => window.direction dir=left
+[ve a] [la] ventana (de la derecha|derecha|siguiente)                                      => window.direction dir=right
+(siguiente|la siguiente|otra) ventana                                                      => window.direction dir=right
+[ve] a la izquierda                                                                        => window.direction dir=left
+[ve] a la derecha                                                                          => window.direction dir=right
+mueve [la ventana|esta ventana|esto|eso] a la izquierda                                    => window.shift dir=left
+mueve [la ventana|esta ventana|esto|eso] a la derecha                                      => window.shift dir=right
+# Del todo a un lado del nivel en el que estás (y si está en otro, se trae).
+(pon|coloca|deja) [la ventana|esta ventana|esto] a la izquierda                            => window.place side=left
+(pon|coloca|deja) [la ventana|esta ventana|esto] a la derecha                              => window.place side=right
+(pon|coloca|deja|mueve) <app:text> a la izquierda                                          => window.place side=left
+(pon|coloca|deja|mueve) <app:text> a la derecha                                            => window.place side=right
+# A otro monitor: hacia un lado, «el otro» (el siguiente) o por número, de izquierda a derecha.
+(mueve|pon|pasa) [la ventana|esta ventana|esto|eso] (a|al|a la|en el|en la) (monitor|pantalla) (de la izquierda|izquierda|izquierdo)  => window.monitor dir=left
+(mueve|pon|pasa) <app:text> (a|al|a la|en el|en la) (monitor|pantalla) (de la izquierda|izquierda|izquierdo)  => window.monitor dir=left
+(mueve|pon|pasa) [la ventana|esta ventana|esto|eso] (a|al|a la|en el|en la) (monitor|pantalla) (de la derecha|derecha|derecho)  => window.monitor dir=right
+(mueve|pon|pasa) <app:text> (a|al|a la|en el|en la) (monitor|pantalla) (de la derecha|derecha|derecho)  => window.monitor dir=right
+(mueve|pon|pasa) [la ventana|esta ventana|esto|eso] (a|al|a la|en el|en la) (monitor|pantalla) (de arriba|arriba)  => window.monitor dir=up
+(mueve|pon|pasa) <app:text> (a|al|a la|en el|en la) (monitor|pantalla) (de arriba|arriba)  => window.monitor dir=up
+(mueve|pon|pasa) [la ventana|esta ventana|esto|eso] (a|al|a la|en el|en la) (monitor|pantalla) (de abajo|abajo)  => window.monitor dir=down
+(mueve|pon|pasa) <app:text> (a|al|a la|en el|en la) (monitor|pantalla) (de abajo|abajo)    => window.monitor dir=down
+(mueve|pon|pasa) [la ventana|esta ventana|esto|eso] (a|al|a la|en el|en la) (otro|otra|siguiente) (monitor|pantalla)  => window.monitor dir=other
+(mueve|pon|pasa) <app:text> (a|al|a la|en el|en la) (otro|otra|siguiente) (monitor|pantalla)  => window.monitor dir=other
+(mueve|pon|pasa) [la ventana|esta ventana|esto|eso] (a|al|a la|en el|en la) (monitor|pantalla) <n:ord>  => window.monitor
+(mueve|pon|pasa) [la ventana|esta ventana|esto|eso] (a|al|a la|en el|en la) <n:ord> (monitor|pantalla)  => window.monitor
+(mueve|pon|pasa) <app:text> (a|al|a la|en el|en la) (monitor|pantalla) <n:ord>             => window.monitor
+(mueve|pon|pasa) <app:text> (a|al|a la|en el|en la) <n:ord> (monitor|pantalla)             => window.monitor
+# Lo de antes: «mueve Firefox al nivel 3 y después ve allí».
+(ve|pasa|salta|cambia) (allí|ahí|allá|para allá)                                           => context.go
+# Cerrar todo menos algo (pide confirmación).
+cierra (todas las ventanas|todas|todo) (menos|excepto|salvo|quitando) (esta|esta ventana|esto|la actual|la de ahora|la que tengo delante)  => window.others
+cierra (todas las ventanas|todas|todo) (de este nivel|del nivel|de aquí) (menos|excepto|salvo|quitando) (esta|esta ventana|esto|la actual|la de ahora|la que tengo delante)  => window.others scope=level
+cierra (todas las ventanas|todas|todo) (menos|excepto|salvo|quitando) <keep:text>          => window.others
+cierra (todas las ventanas|todas|todo) (de este nivel|del nivel|de aquí) (menos|excepto|salvo|quitando) <keep:text>  => window.others scope=level
+cierra (las demás|las otras|el resto de) [ventanas]                                        => window.others
+cierra (las demás|las otras|el resto de) [ventanas] (de este nivel|del nivel|de aquí)      => window.others scope=level
+cierra todas las ventanas                                                                  => window.others all=true
+
+# --- Niveles (arriba el primero) -----------------------------------------------
+mueve [la ventana|esta ventana|esto|eso|la|lo] (a|al) [nivel] <n:ord>                      => window.move
+mueve <app:text> (a|al) [nivel] <n:ord>                                                    => window.move
+(ve|cambia|pasa|salta|sube|baja) (a|al) [nivel] <n:ord>                                    => level.go
+(ve|cambia|pasa|salta|sube|baja) al <n:ord> nivel                                          => level.go
+(ve|cambia|pasa|salta|baja) al último nivel                                                => level.go n=99
+nivel <n:ord>                                                                              => level.go
+sube [un|de|mi] nivel                                                                      => level.step by=-1
+baja [un|de|mi] nivel                                                                      => level.step by=1
+[ve|pasa|cambia] al nivel (de arriba|anterior|superior)                                    => level.step by=-1
+[ve|pasa|cambia] al nivel (de abajo|siguiente|inferior)                                    => level.step by=1
+nivel (de arriba|anterior|superior)                                                        => level.step by=-1
+nivel (de abajo|siguiente|inferior)                                                        => level.step by=1
+[el] siguiente nivel                                                                       => level.step by=1
+
+# --- Sesión -------------------------------------------------------------------
+bloquea [la pantalla|el ordenador|la sesión]                                               => session.lock
+suspende [el ordenador]                                                                    => session.suspend
+[ve] a dormir                                                                              => session.suspend
+apaga (el ordenador|todo)                                                                  => session.poweroff
+reinicia [el] ordenador                                                                    => session.reboot
+(cierra|termina) [la] sesión                                                               => session.logout
+sal de la sesión                                                                           => session.logout
+reinicia veyl                                                                              => veyl.reload
+
+# --- Radios y avisos ------------------------------------------------------------
+(enciende|activa|pon) [el] wifi                                                            => radio device=wifi on=true
+(apaga|desactiva|quita) [el] wifi                                                          => radio device=wifi on=false
+(enciende|activa|pon) [el] bluetooth                                                       => radio device=bluetooth on=true
+(apaga|desactiva|quita) [el] bluetooth                                                     => radio device=bluetooth on=false
+(activa|pon|enciende) [el] [modo] no molestar                                              => quiet on=true
+(desactiva|quita|apaga) [el] [modo] no molestar                                            => quiet on=false
+no molestes                                                                                => quiet on=true
+(deja de|para de) escuchar                                                                 => listen on=false
+no escuches                                                                                => listen on=false
+
+# --- Temporizador ---------------------------------------------------------------
+(pon|abre|activa|empieza|programa|crea) [un|una|el] temporizador (de|para|en|a) <d:dur>    => timer.start
+temporizador [de|para|en] <d:dur>                                                          => timer.start
+(pon|abre) <d:dur> de temporizador                                                         => timer.start
+recuerda (en|dentro de) <d:dur>                                                            => timer.start
+(para|quita|cancela|apaga|desactiva) [el] temporizador                                     => timer.stop
+cuánto (queda|falta|le queda|le falta) [al|del|en el] [temporizador]                       => timer.left
+
+# --- Agenda ---------------------------------------------------------------------
+(apunta|recuerda) [que] [tengo] <title:text> <w:when>                                      => event.add
+(pon|crea|añade|apunta) (un|una) (evento|cita|recordatorio) [de|para|con] <title:text> <w:when>  => event.add
+<w:when> tengo <title:text>                                                                => event.add
+qué (tengo|hay) [en la agenda|apuntado|pendiente] [para] <w:when>                          => agenda.ask
+qué (tengo|hay) (en la agenda|apuntado|pendiente)                                          => agenda.ask
+
+# --- El diario: qué estuviste mirando -------------------------------------------
+[en] qué (estuve|estaba|he estado|estuvimos) (mirando|viendo|haciendo|trabajando|leyendo) [en] <w:when>  => recall
+[en] qué (estuve|estaba|he estado|estuvimos) (mirando|viendo|haciendo|trabajando|leyendo)                => recall
+<w:when> [en] qué (estuve|estaba|he estado) (mirando|viendo|haciendo|trabajando|leyendo)                 => recall
+qué (hice|vi|miré|leí) <w:when>                                                            => recall
+en qué trabajé <w:when>                                                                    => recall
+qué hice                                                                                   => recall
+
+# Buscar algo, cuánto rato, rato a rato, qué sonó, qué archivos.
+cuándo (vi|miré|abrí|leí|escuché|oí|usé|busqué|visité) <q:text>                            => recall.find
+cuándo (estuve|estaba|he estado) (en|con|mirando|viendo|leyendo|escuchando|usando) <q:text>  => recall.find
+cuándo fue la última vez que (vi|miré|abrí|leí|escuché|usé|estuve en|estuve con) <q:text>   => recall.find
+(busca|buscar) en el diario <q:text>                                                       => recall.find
+(busca|buscar) <q:text> en el diario                                                       => recall.find
+cuánto (tiempo|rato) (estuve|he estado|pasé|he pasado|llevo|estoy) (en|con|mirando|viendo|usando|leyendo) <q:text> [<w:when>]  => recall.time
+cuánto (tiempo|rato) (estuve|he estado|pasé|he pasado|llevo) (delante del|en el|frente al|con el) ordenador [<w:when>]  => recall.time q=
+cuánto (tiempo|rato) de pantalla [llevo|tengo|hice|he hecho|hay] [<w:when>]               => recall.time q=
+qué hice hora a hora [<w:when>]                                                            => recall.timeline
+qué hice <w:when> hora a hora                                                              => recall.timeline
+<w:when> hora a hora                                                                       => recall.timeline
+muestra [el|la] (cronología|línea de tiempo|línea del tiempo) [de] [<w:when>]              => recall.timeline
+qué (música|canciones|canción) (escuché|sonó|sonaron|oí|he escuchado|puse) [<w:when>]      => recall.media
+qué (escuché|estuve escuchando|he escuchado) [<w:when>]                                    => recall.media
+qué sonó [<w:when>]                                                                        => recall.media
+qué (archivos|documentos) (abrí|he abierto|usé|miré) [<w:when>]                            => recall.files
+(cuéntame|dime|dame|enséñame|muestra) (con detalle|en detalle|todo) [lo] [que] (hice|estuve haciendo|he hecho) [<w:when>]=> recall.full
+(dame|haz|hazme|muestra) (un|el) (informe|resumen detallado|resumen completo) [de|del] [<w:when>]=> recall.full
+qué hice <w:when> con (detalle|todo detalle)                                               => recall.full
+# La vista del diario (base/Diary.qml), en un día si se dice. Las formas del
+# verbo van por sus alias: «muéstrame» se lee «muestra», «llévame», «ve».
+(abre|muestra|ve|ver) [el|mi|la ventana del|la vista del|a mi|al] diario [de|del] [<w:when>] => recall.open
+(abre|muestra|ve|ver) [el|mi|la ventana del|la vista del|a mi|al] diario [de] lo que hice [<w:when>] => recall.open
+(abre|muestra|ve|ver) [el|mi] recall                                                       => recall.open
+[el|mi] diario [de|del] [<w:when>]                                                         => recall.open
+(cierra|quita|oculta) [el|mi|la ventana del|la vista del] diario                           => recall.close
+
+# --- Preguntas ------------------------------------------------------------------
+qué hora es                                                                                => clock.time
+qué (día|fecha) es [hoy]                                                                   => clock.date
+a (qué día|cuántos) estamos [hoy]                                                          => clock.date
+(cómo|qué) (van|hacen|están haciendo) los agentes                                          => agents.ask
+hay agentes [trabajando|en marcha]                                                         => agents.ask
+(cómo va|qué hace|qué está haciendo|en qué está) <who:text>                                => agents.ask
+
+# --- El ordenador por dentro: Veyl lo mide y lo enseña en una tarjeta -------------
+# («espacio» se lee «nivel», por su alias: aquí va así.)
+alias lento = lenta | lentísimo | lentísima | lentisimo | petado | petada | a tirones | fatal | regular | mal
+alias ralentizando = ralentiza | ralentizado | frenando | frena | petando | peta | colgando | cuelga | trabando | traba | bloqueando
+alias porque = por qué | porqué | cómo es que
+porque (va|está|anda|funciona|vá) [tan|muy] lento [el|mi] [ordenador|sistema|esto|todo|linux]   => system.status
+porque [el|mi] (ordenador|sistema|esto|todo|linux) (va|está|anda|funciona) [tan|muy] lento    => system.status
+[el|mi] (ordenador|sistema|esto|todo) (va|está|anda) [muy|tan] lento                          => system.status
+porque se (traba|cuelga|congela|ralentiza|queda pillado|para) [el|mi] [ordenador|sistema|esto|todo] => system.status
+qué (proceso|programa|aplicación|app|cosa) [es lo que] [me] está ralentizando [el|al|mi] [ordenador|sistema|esto|todo] => system.status
+qué [es lo que] [me] (está ralentizando|ralentiza) [el|al|mi] [ordenador|sistema|esto|todo]   => system.status
+(quién|qué) tiene la culpa de que vaya lento [el|mi] [ordenador|sistema|esto|todo]            => system.status
+(cómo va|cómo está|qué tal va|qué tal está|cómo anda) [el|mi] (ordenador|sistema|linux)       => system.status
+(estado|rendimiento|salud) del (ordenador|sistema)                                            => system.status
+qué (proceso|programa|aplicación|app) (consume|usa|gasta|chupa|se come|tira de|está consumiendo|está usando|está gastando|está chupando|se está comiendo|está tirando de|me come|me consume) más [recursos]                   => system.status
+qué (consume|usa|gasta|chupa|se come|tira de|está consumiendo|está usando|está gastando|está chupando|se está comiendo|está tirando de|me come|me consume) más [recursos] [en] [el] [ordenador|sistema]                       => system.status
+
+qué (proceso|programa|aplicación|app) (consume|usa|gasta|ocupa|chupa|se come|tira de|está consumiendo|está usando|está gastando|está ocupando|está chupando|se está comiendo|está tirando de|me come|me consume|me ocupa) más (cpu|procesador)             => system.cpu
+qué [es lo que] (consume|usa|gasta|ocupa|chupa|se come|tira de|está consumiendo|está usando|está gastando|está ocupando|está chupando|se está comiendo|está tirando de|me come|me consume|me ocupa) [más] [la|el] (cpu|procesador)                         => system.cpu
+(uso|consumo|carga) de [la|el] (cpu|procesador)                                               => system.cpu
+(cómo va|cómo está|qué tal va) [la|el] (cpu|procesador)                                       => system.cpu
+porque (va|está|suena) [tan] (alto|fuerte|a tope) el ventilador                               => system.cpu
+porque (suena|hace ruido|se oye) [tanto] [el] ventilador                                      => system.cpu
+
+qué (proceso|programa|aplicación|app) (consume|usa|gasta|ocupa|chupa|se come|tira de|está consumiendo|está usando|está gastando|está ocupando|está chupando|se está comiendo|está tirando de|me come|me consume|me ocupa) más (memoria|ram)                => system.memory
+qué [es lo que] (consume|usa|gasta|ocupa|chupa|se come|tira de|está consumiendo|está usando|está gastando|está ocupando|está chupando|se está comiendo|está tirando de|me come|me consume|me ocupa) [más|tanta] [la] (memoria|ram)                         => system.memory
+cuánta (memoria|ram) (queda|tengo|hay|me queda) [libre]                                       => system.memory
+(uso|consumo) de [la] (memoria|ram)                                                           => system.memory
+(cómo va|cómo está|qué tal va) la (memoria|ram)                                               => system.memory
+
+qué [es lo que] (ocupa|está ocupando|me ocupa|me está ocupando) [más|tanto] [nivel] (en|del) [el|mi] (ordenador|disco|sistema) => system.disk
+qué [es lo que] (ocupa|está ocupando|me ocupa|me está ocupando) [más|tanto] nivel                                    => system.disk
+cuánto (nivel|disco) (queda|tengo|hay|me queda) [libre] [en el disco]                       => system.disk
+(cuánto|qué) nivel libre (queda|tengo|hay|me queda)                                         => system.disk
+porque (está|se ha|se está) (lleno|llenado|llenando) el disco                                 => system.disk
+(nivel|uso) (en|del) disco                                                                  => system.disk
+cómo (va|está) el disco                                                                       => system.disk
+
+porque (va|está|anda) [tan|muy] lento (la red|internet|el internet|el wifi|la wifi|la conexión) => system.net
+porque (la red|internet|el internet|el wifi|la wifi|la conexión) (va|está|anda) [tan|muy] lento => system.net
+(la red|internet|el internet|el wifi|la wifi|la conexión) (va|está|anda) [muy|tan] lento        => system.net
+(cómo va|cómo está|qué tal va|qué tal está|cómo anda) (la red|internet|el internet|el wifi|la wifi|la conexión) => system.net
+qué (proceso|programa|aplicación|app) (consume|usa|gasta|ocupa|chupa|se come|tira de|está consumiendo|está usando|está gastando|está ocupando|está chupando|se está comiendo|está tirando de|me come|me consume|me ocupa) más (red|internet|ancho de banda|datos) => system.net
+(qué|quién) (consume|usa|gasta|ocupa|chupa|se come|tira de|está consumiendo|está usando|está gastando|está ocupando|está chupando|se está comiendo|está tirando de|me come|me consume|me ocupa) [la] (red|internet|ancho de banda|conexión)                => system.net
+[porque] no (va|funciona|carga|tengo|hay) internet                                            => system.net
+[porque] no (cargan|carga|van|abren) las (webs|páginas)                                       => system.net
+(tengo|hay) internet                                                                          => system.net
+(latencia|ping) [de la red|de internet]                                                       => system.net
+
+qué (consume|usa|gasta|ocupa|chupa|se come|tira de|está consumiendo|está usando|está gastando|está ocupando|está chupando|se está comiendo|está tirando de|me come|me consume|me ocupa) [la] (gráfica|gpu|tarjeta gráfica)                                 => system.gpu
+(uso|consumo) de [la] (gráfica|gpu)                                                           => system.gpu
+(cómo va|cómo está|qué tal va) la (gráfica|gpu)                                               => system.gpu
+
+(qué|a qué) temperatura (tiene|está|lleva) [el|la|mi] [ordenador|cpu|procesador|gráfica|gpu]  => system.temp
+temperatura (del|de la) (ordenador|cpu|procesador|gráfica|gpu)                                => system.temp
+[porque] (está|se está poniendo|se pone) (caliente|muy caliente|tan caliente|ardiendo) [el|mi] [ordenador|cpu|procesador] => system.temp
+
+cuánta batería (queda|tengo|me queda|hay|le queda)                                            => system.battery
+(cuánto|cuánto tiempo) (queda|me queda|dura|le queda) [de] [la] batería                       => system.battery
+(cómo va|cómo está|qué tal va) la batería                                                     => system.battery
+(nivel|estado) de [la] batería                                                                => system.battery
+
+# --- Buscar y poner: en la web, en YouTube, en Spotify ---------------------------
+# `whole=true`: lo de detrás de «y» no hereda el verbo («busca pan y leche» es
+# una búsqueda; «abre Firefox y busca gatos», dos órdenes).
+alias busca = buscar | búscame | buscame | búscalo | busques | googlea | googlear | googléame
+alias escucha = escuchar | escuchemos | oír
+busca <q:text>                                                                             => web.search whole=true
+busca <q:text> en (google|internet|la web|la red)                                          => web.search where=google whole=true
+busca en (google|internet|la web) <q:text>                                                 => web.search where=google whole=true
+busca <q:text> en youtube                                                                  => web.search where=youtube whole=true
+busca en youtube <q:text>                                                                  => web.search where=youtube whole=true
+busca <q:text> en [la] wikipedia                                                           => web.search where=wikipedia whole=true
+busca en [la] wikipedia <q:text>                                                           => web.search where=wikipedia whole=true
+busca <q:text> en amazon                                                                   => web.search where=amazon whole=true
+busca <q:text> en github                                                                   => web.search where=github whole=true
+busca <q:text> en reddit                                                                   => web.search where=reddit whole=true
+busca <q:text> en (google maps|maps|el mapa|mapas)                                         => web.search where=maps whole=true
+busca <q:text> en spotify                                                                  => web.search where=spotify whole=true
+busca en spotify <q:text>                                                                  => web.search where=spotify whole=true
+busca (imágenes|fotos) de <q:text>                                                         => web.search where=images whole=true
+(dónde está|cómo llego a|llévame a) <q:text> en [el] (mapa|maps|google maps)               => web.search where=maps whole=true
+abre youtube                                                                                => web.open site=youtube
+abre google                                                                                 => web.open site=google
+abre gmail                                                                                  => web.open site=gmail
+abre github                                                                                 => web.open site=github
+abre twitch                                                                                 => web.open site=twitch
+abre [la] wikipedia                                                                        => web.open site=wikipedia
+abre google maps                                                                           => web.open site=maps
+abre <site:text> en firefox                                                              => web.open via=firefox lucky=true
+abre <site:text> en chrome                                                               => web.open via=chrome lucky=true
+abre <site:text> en chromium                                                             => web.open via=chromium lucky=true
+abre <site:text> en brave                                                                => web.open via=brave lucky=true
+abre <site:text> en zen                                                                  => web.open via=zen lucky=true
+abre <site:text> en el navegador                                                         => web.open via=navegador lucky=true
+(abre|ve a|vete a|entra en|llévame a) (la web de|la página de|la web|la página) <site:text>    => web.open lucky=true
+entra en <site:text>                                                                       => web.open
+# Solo se pone música cuando se dice dónde («… en Spotify») o que es música
+# («la canción …»). «Pon …» a secas solo vale tras abrir dónde en la misma
+# frase («abre Spotify y pon Estopa»); si no, es otra cosa y lo ve el modelo.
+(pon|reproduce|escucha) <q:text> en spotify                                                => play.search where=spotify whole=true
+(pon|reproduce|escucha) en spotify <q:text>                                                => play.search where=spotify whole=true
+(pon|reproduce) <q:text> en youtube                                                        => play.search where=youtube whole=true
+(pon|reproduce) en youtube <q:text>                                                        => play.search where=youtube whole=true
+(pon|reproduce|escucha) (la canción|el disco|el álbum|la playlist|la lista|música de|canciones de|el tema) <q:text>  => play.search music=true whole=true
+(pon|reproduce|escucha) <q:text>                                                           => play.search whole=true
+
+# --- Veyl -----------------------------------------------------------------------
+(cambia|pon|usa) (el|de) (esquema|tema) [de color|de colores] (a|al|por|en) <name:text>    => scheme.set
+(pon|usa) el (esquema|tema) <name:text>                                                    => scheme.set
+cambia los colores (a|por) <name:text>                                                     => scheme.set
+(abre|muestra) [el] [historial del] portapapeles                                           => launcher view=clipboard
+(abre|muestra) (la entrada|el lanzador|el buscador)                                        => launcher view=
+haz [una|un] captura [de pantalla|de la pantalla]                                          => shot what=screen
+captura la pantalla                                                                        => shot what=screen
+haz [una|un] captura de (una zona|un trozo|una parte|una región) [de la pantalla]          => shot what=area
+(captura|recorta) (una zona|un trozo|una parte) [de la pantalla]                           => shot what=area
+
+# --- Vistas: escritorios con nombre hechos con lo que tienes abierto --------------
+alias crea = crear | creas | crees | cree | créame | monta | montar | móntame | arma | armar
+alias guarda = guardar | guardas | guardes | guarde | guárdame | guárdalo | convierte | convertir
+alias recrea = recrear | recréame | rehaz | rehacer | reconstruye | reconstruir | restaura | restaurar | reabre | reabrir
+alias deshaz = deshacer | deshace | recoge | recoger | disuelve | disolver | desmonta | desmontar
+alias olvida = olvidar | olvídate de | borra | borrar | elimina | eliminar
+(crea|haz) [una|la] [nueva] vista [de|para|llamada|que se llame] <name:text>                => view.create
+nueva vista [de|para|llamada] <name:text>                                                  => view.create
+guarda (este nivel|esto|lo que tengo aquí|lo de aquí) (como|en) [la|una] [nueva] vista [de] <name:text>   => view.create from=level
+(abre|ve|cambia|pasa|vuelve) [a] la vista [de] <name:text>                                  => view.open
+vista <name:text>                                                                          => view.open
+recrea [la] vista [de] <name:text>                                                         => view.open again=true
+recrea (la|esta) vista                                                                     => view.open again=true
+(deshaz|cierra) [la] vista [de] <name:text>                                                => view.undo
+(deshaz|cierra) (la|esta) vista                                                            => view.undo
+(actualiza|guarda) (la|esta) vista                                                         => view.save
+(actualiza|guarda) la vista [de] <name:text>                                               => view.save
+olvida [la] vista [de] <name:text>                                                         => view.forget
+(abre|muestra|ve a) [las|mis] vistas                                                       => view.list
+(qué|cuáles) vistas (hay|tengo)                                                            => view.list
+
+# --- Respuestas a «¿seguro?» ----------------------------------------------------
+(sí|vale|venga|hazlo|adelante|confirmo|de acuerdo|claro|dale|ok|okey)                      => confirm
+(no|cancela|déjalo|olvídalo|mejor no)                                                      => cancel
