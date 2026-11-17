@@ -1,0 +1,254 @@
+#!/usr/bin/env python3
+# veyl-clip · el historial del portapapeles de Veyl: texto e imágenes, en
+# $XDG_STATE_HOME/veyl/clipboard (un índice, index.json, y un archivo por
+# cosa copiada, en data/). Lo que un gestor de contraseñas marca como secreto
+# no se guarda.
+#
+#   veyl-clip watch         vigila el portapapeles y guarda lo que pasa por él
+#   veyl-clip store         guarda lo que hay ahora (lo llama `wl-paste --watch`)
+#   veyl-clip copy <id>     lo devuelve al portapapeles
+#   veyl-clip pin <id>      lo fija, o lo suelta si estaba fijado
+#   veyl-clip delete <id>   lo borra
+#   veyl-clip clear         borra todo salvo lo fijado
+#   veyl-clip list          el índice, lo más reciente primero
+#
+# Cada vez que el historial cambia escribe una línea, «changed»: así se
+# entera Veyl, que es quien tiene abierto `veyl-clip watch`.
+import contextlib
+import fcntl
+import hashlib
+import json
+import os
+import re
+import struct
+import subprocess
+import sys
+import time
+
+HOME = os.path.join(os.environ.get("XDG_STATE_HOME") or os.path.expanduser("~/.local/state"), "veyl", "clipboard")
+INDEX = os.path.join(HOME, "index.json")
+DATA = os.path.join(HOME, "data")
+KEEP = 200               # cuántas cosas sin fijar se recuerdan
+TEXT_MAX = 1 << 20       # un texto mayor no se guarda (1 MiB)
+IMAGE_MAX = 32 << 20     # ni una imagen mayor (32 MiB)
+SHOWN = 1200             # letras de un texto que van al índice, para enseñarlo y buscar en él
+IMAGES = ["image/png", "image/jpeg", "image/webp", "image/gif", "image/bmp", "image/tiff"]
+PLAIN = ("UTF8_STRING", "STRING", "TEXT")
+
+
+@contextlib.contextmanager
+def index(notify=True):
+    """El índice, para leerlo y cambiarlo sin que otro lo pise a la vez."""
+    os.makedirs(DATA, mode=0o700, exist_ok=True)
+    os.chmod(HOME, 0o700)
+    os.chmod(DATA, 0o700)
+    with open(os.path.join(HOME, "lock"), "w") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        try:
+            with open(INDEX) as file:
+                entries = json.load(file)
+        except FileNotFoundError:
+            entries = []
+        if not isinstance(entries, list) or not all(valid_entry(entry) for entry in entries):
+            raise ValueError("index.json no es un índice válido; no se ha modificado")
+        before = json.dumps(entries)
+        yield entries
+        if json.dumps(entries) == before and os.path.exists(INDEX):
+            return
+        scratch = INDEX + ".new"
+        with open(os.open(scratch, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600), "w") as file:
+            json.dump(entries, file, ensure_ascii=False)
+        os.replace(scratch, INDEX)
+    if notify:
+        print("changed", flush=True)
+
+
+def valid_entry(entry):
+    return (
+        isinstance(entry, dict)
+        and isinstance(entry.get("id"), str)
+        and re.fullmatch(r"[0-9a-f]{20}", entry["id"]) is not None
+        and entry.get("mime") in ["text/plain", *IMAGES]
+        and isinstance(entry.get("pinned"), bool)
+        and entry.get("kind") in ("text", "link", "color", "image")
+        and (entry["kind"] == "image" or isinstance(entry.get("text"), str))
+    )
+
+
+def forget(entry):
+    with contextlib.suppress(OSError):
+        os.remove(os.path.join(DATA, entry["id"]))
+
+
+def paste(*args, limit=IMAGE_MAX):
+    # Un archivo grande nunca se carga entero para comprobar luego su tamaño.
+    with subprocess.Popen(["wl-paste", *args], stdout=subprocess.PIPE, stderr=subprocess.DEVNULL) as process:
+        # El vigilante no debe quedarse esperando a un proveedor que no entrega.
+        import threading
+        timer = threading.Timer(5, process.kill)
+        timer.start()
+        try:
+            data = process.stdout.read(limit + 1)
+            if len(data) > limit:
+                process.kill()
+            code = process.wait()
+            return data if code == 0 and len(data) <= limit else b""
+        finally:
+            timer.cancel()
+            if process.poll() is None:
+                process.kill()
+
+
+def drain(stream):
+    while stream.read(65536):
+        pass
+
+
+def measure(blob):
+    """Ancho y alto de un PNG, que lo dice en su cabecera."""
+    if len(blob) >= 24 and blob[:8] == b"\x89PNG\r\n\x1a\n" and blob[12:16] == b"IHDR":
+        return struct.unpack(">II", blob[16:24])
+    return 0, 0
+
+
+def store():
+    # wl-paste pasa por la entrada lo que cree que es el contenido: vale si
+    # es texto. Hay que leerlo siempre, o se queda esperando.
+    if os.environ.get("CLIPBOARD_STATE", "data") != "data":
+        drain(sys.stdin.buffer)
+        return
+    given = sys.stdin.buffer.read(TEXT_MAX + 1)
+    oversized = len(given) > TEXT_MAX
+    drain(sys.stdin.buffer)
+    types = paste("--list-types", limit=65536).decode(errors="replace").split()
+    if "x-kde-passwordManagerHint" in types:
+        return
+    image = next((kind for kind in IMAGES if kind in types), None)
+    if any(kind.startswith("text/plain") or kind in PLAIN for kind in types):
+        if oversized:
+            return
+        mime, blob = "text/plain", given
+    elif image:
+        mime, blob = image, paste("--type", image)
+    elif "text/uri-list" in types:
+        mime, blob = "text/plain", paste("--no-newline", "--type", "text/uri-list", limit=TEXT_MAX)
+    else:
+        return
+
+    entry = {"mime": mime, "bytes": len(blob), "time": int(time.time()), "pinned": False}
+    if mime == "text/plain":
+        text = blob.decode(errors="replace")
+        if not text.strip() or len(blob) > TEXT_MAX:
+            return
+        bare = text.strip()
+        if re.fullmatch(r"#(?:[0-9a-fA-F]{3,4}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})", bare):
+            entry["kind"] = "color"
+        elif re.fullmatch(r"(?:https?|ftp)://\S+", bare):
+            entry["kind"] = "link"
+        else:
+            entry["kind"] = "text"
+        entry.update(text=text[:SHOWN], chars=len(text), lines=text.count("\n") + 1)
+    else:
+        if not blob or len(blob) > IMAGE_MAX:
+            return
+        width, height = measure(blob)
+        entry.update(kind="image", width=width, height=height)
+    entry["id"] = hashlib.sha256(mime.encode() + b"\0" + blob).hexdigest()[:20]
+
+    with index() as entries:
+        if entries and entries[0]["id"] == entry["id"]:
+            return
+        # Lo que ya estaba vuelve arriba, y sigue fijado si lo estaba.
+        for old in entries:
+            if old["id"] == entry["id"]:
+                entry["pinned"] = old["pinned"]
+        entries[:] = [entry] + [old for old in entries if old["id"] != entry["id"]]
+        with open(os.open(os.path.join(DATA, entry["id"]), os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600), "wb") as file:
+            file.write(blob)
+        loose = [old for old in entries if not old["pinned"]]
+        for old in loose[KEEP:]:
+            entries.remove(old)
+            forget(old)
+
+
+def copy(wanted):
+    with index(notify=False) as entries:
+        entry = next((entry for entry in entries if entry["id"] == wanted), None)
+        if not entry:
+            sys.exit(f"veyl-clip: no hay nada con el id {wanted}")
+        # Abierto bajo el bloqueo: aunque otro proceso lo borre al soltarlo,
+        # el descriptor sigue apuntando al contenido correcto.
+        blob = open(os.path.join(DATA, entry["id"]), "rb")
+    kind = [] if entry["mime"] == "text/plain" else ["--type", entry["mime"]]
+    with blob:
+        # wl-copy se queda en segundo plano sirviendo lo copiado: sin salida
+        # propia, para que nadie se quede esperando a que la cierre.
+        subprocess.run(["wl-copy", *kind], stdin=blob, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=True)
+
+
+def pin(wanted):
+    with index() as entries:
+        for entry in entries:
+            if entry["id"] == wanted:
+                entry["pinned"] = not entry["pinned"]
+
+
+def delete(wanted):
+    with index() as entries:
+        for entry in [entry for entry in entries if entry["id"] == wanted]:
+            entries.remove(entry)
+            forget(entry)
+
+
+def clear():
+    with index() as entries:
+        for entry in [entry for entry in entries if not entry["pinned"]]:
+            entries.remove(entry)
+            forget(entry)
+
+
+def bound():
+    """Que el vigilante muera con el estado base que lo lanzó, aunque a este
+    lo maten de golpe: sin él, un reinicio dejaría dos guardando lo mismo."""
+    parent = os.getppid()
+    try:
+        import ctypes
+        import signal
+
+        ctypes.CDLL(None, use_errno=True).prctl(1, signal.SIGTERM)  # PR_SET_PDEATHSIG
+    except (OSError, AttributeError):
+        return
+    # Si el padre ya se fue antes de pedirlo, la señal no llegará nunca.
+    if os.getppid() != parent:
+        sys.exit(0)
+
+
+def watch():
+    bound()
+    with index():
+        pass
+    print("changed", flush=True)
+    # Sin salto de línea añadido: lo copiado se guarda tal cual.
+    os.execvp("wl-paste", ["wl-paste", "--no-newline", "--watch", os.path.realpath(sys.argv[0]), "store"])
+
+
+def main():
+    orders = {"watch": watch, "store": store, "clear": clear, "copy": copy, "pin": pin, "delete": delete}
+    args = sys.argv[1:]
+    if args == ["list"]:
+        with index(notify=False) as entries:
+            json.dump(entries, sys.stdout, ensure_ascii=False, indent=2)
+            print()
+    elif args and args[0] in ("copy", "pin", "delete") and len(args) == 2:
+        orders[args[0]](args[1])
+    elif len(args) == 1 and args[0] in ("watch", "store", "clear"):
+        orders[args[0]]()
+    else:
+        sys.exit("uso: veyl-clip watch | store | copy <id> | pin <id> | delete <id> | clear | list")
+
+
+if __name__ == "__main__":
+    try:
+        main()
+    except (OSError, ValueError, subprocess.SubprocessError) as error:
+        sys.exit(f"veyl-clip: {error}")
