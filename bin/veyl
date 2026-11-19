@@ -1,0 +1,265 @@
+#!/bin/sh
+# veyl · lo que el estado base necesita que le cuenten desde fuera.
+set -eu
+
+root=$(dirname "$(dirname "$(readlink -f "$0")")")
+
+usage() {
+    cat <<EOF
+uso:
+  veyl                                 arranca el estado base
+  veyl agent <id> working|needs|idle   anuncia en qué está un agente
+                  [--window <dirección>]
+  veyl agent <id> done                 el agente terminó: su punto se va
+  veyl event <título> <HH:MM|+min>     apunta un evento hoy (mañana si la hora ya pasó)
+  veyl event <título> <día> [HH:MM]    en un día: AAAA-MM-DD, hoy o mañana; sin hora, todo el día
+  veyl event list                      lo que queda por delante, con su número
+  veyl event remove <número>
+  veyl event clear                     los borra todos (los de Veyl; los de los calendarios, no)
+  veyl event calendars [sync]          los calendarios de fuera y cuántos eventos trajeron;
+                                       sync los vuelve a traer ya
+  veyl event calendars add <enlace> [<nombre>]
+                                       apunta uno (un enlace iCal, un .ics o una carpeta)
+  veyl timer <min>|stop                pone o para el temporizador (sin nada: lo que le queda)
+  veyl context [<nombre>]              nombra el contexto actual (sin nombre: lo quita)
+  veyl scheme [<nombre>]               cambia de esquema de color (sin nombre: los lista)
+  veyl wallpaper <imagen>|clear        pone o quita el fondo de pantalla
+  veyl listen [on|off|toggle|demo]     modo escuchar (sin nada: alterna; demo: sin micro)
+  veyl voice [get <modelo>]            los modelos de voz; get trae uno: «veyl voice get small-q5_1»
+  veyl lock                            bloquea la pantalla
+  veyl settings [<sección>|close]      abre o cierra los ajustes; en una sección (look, sound,
+                                       screens, network, bluetooth, input, alerts, calendars, voice,
+                                       journal, session, nix, about)
+  veyl controls [home|veyl|notes|close]
+                                       abre o cierra el centro de control; en una página
+                                       (veyl: lo que le has pedido; notes: las notificaciones)
+  veyl diary [<día>|close|ask <pregunta…>]
+                                       abre o cierra el diario; en un día («2026-11-12»), o
+                                       preguntándole a Veyl desde él: «veyl diary ask qué leí de nutrición»
+  veyl say <texto…>                    una orden, como si se dijera: «veyl say sube el volumen a 85»
+  veyl recall [--full|--json] [<cuándo…>]
+                                       qué estuviste mirando: «veyl recall el jueves por la tarde»;
+                                       --full, todo con detalle; --json, en datos
+  veyl timeline [<cuándo…>]            lo mismo, rato a rato: «veyl timeline ayer»
+  veyl find <texto…>                   cuándo salió algo en el diario: «veyl find fallout»
+  veyl launcher [<vista>|close|<texto>]
+                                       abre o cierra la entrada; en una vista
+                                       (clipboard, outputs, inputs, schemes),
+                                       o ya con algo escrito: veyl launcher = 2+2
+EOF
+    exit "${1:-1}"
+}
+
+# Llama al estado base; las funciones devuelven un error o nada.
+call() {
+    error=$(qs -p "$root" ipc call "$@" 2>/dev/null) || {
+        echo "veyl: el estado base no está en marcha" >&2
+        exit 1
+    }
+    [ -z "$error" ] || {
+        echo "veyl: $error" >&2
+        exit 1
+    }
+}
+
+# veyld: el de $PATH o el que se compila en veyld/.
+daemon() {
+    command -v veyld 2>/dev/null || {
+        bin=$root/veyld/target/release/veyld
+        [ -x "$bin" ] || {
+            echo "veyl: falta veyld ($root/veyld/build.sh)" >&2
+            exit 1
+        }
+        echo "$bin"
+    }
+}
+
+# La ventana desde la que se llama: el primer ancestro que Hyprland conoce.
+window() {
+    clients=$(hyprctl clients -j 2>/dev/null) || return 0
+    pid=$$
+    while [ "${pid:-0}" -gt 1 ]; do
+        address=$(printf %s "$clients" | jq -r --argjson pid "$pid" 'first(.[] | select(.pid == $pid) | .address) // empty')
+        if [ -n "$address" ]; then
+            echo "$address"
+            return
+        fi
+        pid=$(awk '/^PPid:/ { print $2 }' "/proc/$pid/status" 2>/dev/null) || return 0
+    done
+}
+
+case "${1:-run}" in
+run)
+    exec qs -p "$root"
+    ;;
+agent)
+    [ $# -ge 3 ] || usage
+    id=$2 phase=$3
+    shift 3
+    if [ "$phase" = done ]; then
+        call agents remove "$id"
+        exit
+    fi
+    if [ "${1:-}" = --window ]; then
+        [ $# -ge 2 ] || usage
+        address=$2
+    else
+        address=$(window)
+    fi
+    call agents set "$id" "$phase" "$address"
+    ;;
+event)
+    case "${2:-}" in
+    clear) call agenda clear ;;
+    calendars)
+        if [ "${3:-}" = sync ]; then
+            call agenda sync
+        elif [ "${3:-}" = add ]; then
+            [ $# -ge 4 ] || usage
+            call agenda follow "$4" "${5:-}"
+        else
+            qs -p "$root" ipc call agenda calendars 2>/dev/null || {
+                echo "veyl: el estado base no está en marcha" >&2
+                exit 1
+            }
+        fi
+        ;;
+    list) qs -p "$root" ipc call agenda list 2>/dev/null || {
+        echo "veyl: el estado base no está en marcha" >&2
+        exit 1
+    } ;;
+    remove)
+        [ $# -eq 3 ] || usage
+        call agenda remove "$3"
+        ;;
+    *)
+        case $# in
+        3)
+            case $3 in
+            *-* | hoy | mañana) call agenda add "$2" "$3" "" ;;
+            *) call agenda set "$2" "$3" ;;
+            esac
+            ;;
+        4) call agenda add "$2" "$3" "$4" ;;
+        *) usage ;;
+        esac
+        ;;
+    esac
+    ;;
+timer)
+    case "${2:-}" in
+    "") qs -p "$root" ipc call timer get 2>/dev/null ;;
+    stop) call timer stop ;;
+    *) call timer start "$2" ;;
+    esac
+    ;;
+settings)
+    case "${2:-}" in
+    "") call settings toggle ;;
+    close) call settings close ;;
+    *) call settings open "$2" ;;
+    esac
+    ;;
+diary)
+    case "${2:-}" in
+    "") call diary toggle ;;
+    close) call diary close ;;
+    ask) shift 2; call diary ask "$*" ;;
+    *) call diary open "$2" "" ;;
+    esac
+    ;;
+controls)
+    case "${2:-}" in
+    "") call controls toggle ;;
+    close) call controls close ;;
+    *) call controls open "$2" ;;
+    esac
+    ;;
+context)
+    id=$(hyprctl activeworkspace -j | jq -r .id)
+    # Un espacio cuyo nombre es su número vuelve a mostrarse como número.
+    name=$(printf %s "${2:-$id}" | sed 's/[\\"]/\\&/g')
+    hyprctl dispatch "hl.dsp.workspace.rename({ workspace = \"$id\", name = \"$name\" })" >/dev/null
+    ;;
+scheme)
+    own=${XDG_CONFIG_HOME:-$HOME/.config}/veyl/schemes
+    if [ $# -lt 2 ]; then
+        # El activo, marcado; los del usuario tapan a los de Veyl con su mismo nombre.
+        current=$(qs -p "$root" ipc call scheme get 2>/dev/null) || current=
+        for file in "$own"/*.json "$root"/schemes/*.json; do
+            [ -f "$file" ] && basename "$file" .json
+        done | sort -u | while read -r name; do
+            [ "$name" = "$current" ] && echo "* $name" || echo "  $name"
+        done
+        exit
+    fi
+    [ -f "$own/$2.json" ] || [ -f "$root/schemes/$2.json" ] || {
+        echo "veyl: no existe el esquema $2 (veyl scheme los lista)" >&2
+        exit 1
+    }
+    call scheme set "$2"
+    ;;
+wallpaper)
+    [ $# -eq 2 ] || usage
+    if [ "$2" = clear ]; then
+        call wallpaper clear
+    else
+        [ -f "$2" ] || {
+            echo "veyl: no existe la imagen $2" >&2
+            exit 1
+        }
+        call wallpaper set "$(readlink -f "$2")"
+    fi
+    ;;
+listen)
+    case "${2:-toggle}" in
+    on) call listen start ;;
+    off) call listen stop ;;
+    toggle) call listen toggle ;;
+    demo) call listen demo ;;
+    *) usage ;;
+    esac
+    ;;
+lock)
+    call lock lock
+    ;;
+voice)
+    shift
+    bin=$(daemon)
+    exec "$bin" model "$@"
+    ;;
+say)
+    shift
+    [ $# -ge 1 ] || usage
+    bin=$(daemon)
+    exec "$bin" say "$@"
+    ;;
+recall | timeline)
+    command=$1
+    shift
+    bin=$(daemon)
+    exec "$bin" "$command" "$@"
+    ;;
+find)
+    shift
+    [ $# -ge 1 ] || usage
+    bin=$(daemon)
+    exec "$bin" find "$@"
+    ;;
+launcher)
+    shift
+    case "${1:-}" in
+    "") call launcher toggle ;;
+    close) call launcher close ;;
+    clipboard | outputs | inputs | schemes) call launcher view "$1" ;;
+    =) shift; call launcher type "$*" ;;
+    *) call launcher type "$*" ;;
+    esac
+    ;;
+-h | --help | help)
+    usage 0
+    ;;
+*)
+    usage
+    ;;
+esac
