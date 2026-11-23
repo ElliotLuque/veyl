@@ -33,13 +33,24 @@
 //! {"hold": true}                         los avisos no caducan (el puntero está encima)
 //! {"listen": true, "hold": true}         escucha una frase por el micro; hold: con la tecla
 //!                                        mantenida, hasta {"finish": true} (false: deja de escuchar)
+//! {"stop": 7}                            deja de pensar la pregunta 7 (la `n` de `thinking`)
+//! {"agent_answer": {"id": "claude:123", "key": "1"}}   contesta a lo que pregunta un agente
+//!                                        (una de las opciones de su `ask`, con una tecla en su terminal)
+//! {"id": 5, "agents_demo": 2}            agentes de ejemplo: uno trabajando y otro preguntando lo
+//!                                        de la pantalla 2 de `agents::SAMPLES` ("next": la siguiente; "off": fuera)
 //! ```
 //!
 //! Lo que manda: `{"id", …}` en respuesta a lo que lo llevaba, `{"agents":
 //! […]}` y, a Veyl, `{"call": "timer.start", "args": [25]}` y las
 //! notificaciones: todas al saludar (`{"notes": […]}`, la más reciente
 //! primero), y luego cada una que llega o cambia (`{"note": {…}}`) y cada
-//! una que se va (`{"note_gone": 7}`); y mientras escucha, `{"voice": {"level":
+//! una que se va (`{"note_gone": 7}`); lo que piensa el cerebro (`{"thinking":
+//! {"said", "since", "n", "stop", "steps": [{"icono", "texto",
+//! "at"}], "sources": [{"titulo", "host", "url"}]}}`, otra vez con cada paso, y
+//! `null` al acabar), su tarjeta en cuanto la compone (`{"card": {…, "n",
+//! "live": true}}`), luego la definitiva (`{"card": {…, "n", "say"}}`) y lo
+//! que le llega después (`{"card_patch": {"n", "imagen"}}`); lo que pide que no se bloquee
+//! (`{"awake": [{"app", "reason"}]}`), al saludar y cada vez que cambia; y mientras escucha, `{"voice": {"level":
 //! 0.4}}` cada 50 ms, `{"voice": {"speaking": true}}` al empezar a hablar y
 //! `{"voice": {"heard": "…"}}` con lo dicho.
 
@@ -50,6 +61,8 @@ use std::os::unix::fs::PermissionsExt;
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::PathBuf;
 use std::process::Command;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, RecvTimeoutError, Sender};
 use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
@@ -58,6 +71,7 @@ use serde_json::{Value, json};
 
 use crate::agents::{self, Agent};
 use crate::apps::{self, App};
+use crate::awake::{self, Hold};
 use crate::brain;
 use crate::bus::{self, Bus, Incoming};
 use crate::calendars;
@@ -98,17 +112,30 @@ pub enum Event {
     /// Lo que oye el micro mientras escucha.
     Voice(Voice),
     Idle(bool),
+    /// Lo que pide ahora que no se bloquee (un vídeo en el navegador).
+    Held(Vec<Hold>),
     Tick,
     Join(u64, UnixStream),
     Said(u64, Value),
     Left(u64),
-    /// Lo que contestó el modelo.
+    /// Lo que contestó el modelo a la pregunta `n`.
     Answered {
         client: u64,
         id: Value,
         said: String,
         source: String,
         outcome: Outcome,
+        n: u64,
+    },
+    /// Lo que va haciendo el cerebro con la pregunta `n`.
+    Step {
+        n: u64,
+        step: brain::Step,
+    },
+    /// La portada de la tarjeta de la pregunta `n`, sacada de uno de sus enlaces.
+    Cover {
+        n: u64,
+        url: String,
     },
     /// Lo medido del ordenador (system.*), con su tarjeta.
     Sensed {
@@ -175,11 +202,15 @@ pub struct Daemon {
     pub settings: Settings,
     pub shell: Shell,
     pub agents: Vec<Agent>,
+    /// La pantalla de ejemplo de la demo de agentes que se enseña, si hay demo.
+    demo: Option<usize>,
     pub split: u32,
     clients: HashMap<u64, Client>,
     /// La ventana con el foco, se esté o no.
     current: Option<Window>,
     idle: bool,
+    /// Lo que pide que no se bloquee: mientras haya algo, se está.
+    held: Vec<Hold>,
     /// Lo que espera un «sí»: la orden peligrosa y las que iban detrás.
     pending: Option<(Vec<Parse>, Instant, String)>,
     /// De qué se está hablando, para «muévelo» o «ve allí».
@@ -211,9 +242,14 @@ pub struct Daemon {
     /// y de dónde vino lo último (lo que pida confirmar, lo confirma quien habló).
     talk: Vec<(Instant, String, String)>,
     talk_source: String,
-    /// Cuántas preguntas está pensando el cerebro, y la última (para Veyl).
+    /// Cuántas preguntas está pensando el cerebro, y la última (para Veyl),
+    /// con su número: el último que se ha dado.
     pondering: usize,
     pondered: Value,
+    thought: u64,
+    /// Las preguntas al cerebro que aún no han contestado, por su número: lo
+    /// que las para y lo preguntado. Una que ya no está se paró.
+    asking: HashMap<u64, (Arc<AtomicBool>, String)>,
     /// La tarjeta que el cerebro ha compuesto para lo que piensa ahora, y si
     /// la respuesta va en ella (entonces, sin notificación).
     card: Option<Value>,
@@ -222,9 +258,10 @@ pub struct Daemon {
     shown_card: Option<Value>,
     /// El día que se mira en la vista del diario, si la pregunta viene de ahí.
     diary_day: String,
-    /// La imagen de la tarjeta, que se busca en su primer enlace mientras el
-    /// modelo acaba de escribir.
-    picture: Option<(std::sync::mpsc::Receiver<String>, Instant)>,
+    /// La portada que se busca para la tarjeta de la pregunta `n` en sus
+    /// enlaces, mientras el modelo acaba de escribir o después: entonces, la
+    /// tarjeta tal como se apuntó en el diario y su fila, para ponérsela.
+    cover: Option<(u64, Option<(Value, i64)>)>,
     /// Las vistas guardadas.
     pub views: Views,
     /// El hilo que trae los calendarios de fuera: se le despierta para que lo haga ya.
@@ -272,7 +309,7 @@ impl Daemon {
         if let Some(error) = error {
             eprintln!("veyld: {error}");
         }
-        Daemon {
+        let mut daemon = Daemon {
             split: hypr.split(),
             hypr,
             journal,
@@ -282,9 +319,11 @@ impl Daemon {
             settings: config::settings(),
             shell: Shell::default(),
             agents: Vec::new(),
+            demo: None,
             clients: HashMap::new(),
             current: None,
             idle: false,
+            held: Vec::new(),
             pending: None,
             context: orders::Context::default(),
             tx,
@@ -306,14 +345,36 @@ impl Daemon {
             talk_source: String::new(),
             pondering: 0,
             pondered: Value::Null,
+            // Los números de las preguntas no se repiten aunque veyld se
+            // reinicie: Veyl recuerda el de la tarjeta que cerraste, y una
+            // del historial lleva el suyo.
+            thought: now().max(0) as u64,
+            asking: HashMap::new(),
             card: None,
             carded: false,
             shown_card: None,
             diary_day: String::new(),
-            picture: None,
+            cover: None,
             views: Views::load(),
             calendars: None,
-        }
+        };
+        daemon.recall_talk();
+        daemon
+    }
+
+    /// Lo hablado con el cerebro en los últimos diez minutos, del diario: una
+    /// pregunta de seguimiento («¿y en Madrid?») sigue la conversación aunque
+    /// veyld se haya reiniciado entre medias.
+    fn recall_talk(&mut self) {
+        let Some(journal) = self.journal.as_ref().filter(|_| self.settings.journal) else {
+            return;
+        };
+        let at = now();
+        self.talk = journal
+            .talk(at - 600_000)
+            .into_iter()
+            .filter_map(|(time, said, answer)| Some((Instant::now().checked_sub(Duration::from_millis((at - time).max(0) as u64))?, said, answer)))
+            .collect();
     }
 
     fn start(&mut self) {
@@ -440,11 +501,16 @@ impl Daemon {
         self.look(wall);
     }
 
+    /// Lo que pide que no se bloquee, para Veyl.
+    fn awake(&self) -> Value {
+        json!({ "awake": self.held.iter().map(|h| json!({ "app": h.app, "reason": h.reason })).collect::<Vec<_>>() })
+    }
+
     /// Por qué no estás, si no estás.
     fn absence(&self) -> Option<&'static str> {
         if self.shell.locked {
             Some("bloqueado")
-        } else if self.idle {
+        } else if self.idle && self.held.is_empty() {
             Some("inactivo")
         } else {
             None
@@ -644,8 +710,15 @@ impl Daemon {
             journal.agents(now(), &agents);
         }
         self.agents = agents;
-        let message = json!({ "agents": self.agents });
+        let message = json!({ "agents": self.agents_view() });
         self.broadcast(&message, |c| c.agents);
+    }
+
+    /// Los agentes como los ve Veyl: los de verdad y, si hay demo, los de ejemplo.
+    fn agents_view(&self) -> Vec<Agent> {
+        let mut out = self.agents.clone();
+        out.extend(self.demo.map(agents::demo).unwrap_or_default());
+        out
     }
 
     fn shell_state(&mut self, state: &Value) {
@@ -688,7 +761,7 @@ impl Daemon {
             if let Some(root) = text("root") {
                 self.shell.root = root;
             }
-            let agents = json!({ "agents": self.agents });
+            let agents = json!({ "agents": self.agents_view() });
             self.send(client, &agents);
             let notes = json!({ "notes": self.notes.all() });
             self.send(client, &notes);
@@ -696,12 +769,14 @@ impl Daemon {
             self.send(client, &thinking);
             let views = json!({ "views": self.views_listing() });
             self.send(client, &views);
+            let awake = self.awake();
+            self.send(client, &awake);
         }
         if text("watch").as_deref() == Some("agents") {
             if let Some(c) = self.clients.get_mut(&client) {
                 c.agents = true;
             }
-            let agents = json!({ "agents": self.agents });
+            let agents = json!({ "agents": self.agents_view() });
             self.send(client, &agents);
         }
         if let Some(state) = message.get("state") {
@@ -717,6 +792,40 @@ impl Daemon {
             && let Some(ear) = &self.ear
         {
             let _ = ear.send(voice::Order::Finish);
+        }
+        if let Some(n) = message.get("stop").and_then(Value::as_u64) {
+            self.stop_thinking(n);
+        }
+        if let Some(demo) = message.get("agents_demo") {
+            self.demo = match demo.as_str() {
+                Some("off") => None,
+                Some(_) => Some(self.demo.map_or(0, |n| (n + 1) % agents::SAMPLES.len())),
+                None => demo.as_u64().map(|n| n as usize % agents::SAMPLES.len()),
+            };
+            let message = json!({ "agents": self.agents_view() });
+            self.broadcast(&message, |c| c.agents);
+            let shown = self.demo.map(|n| json!({ "n": n + 1, "of": agents::SAMPLES.len(), "name": agents::SAMPLES[n].2, "agent": agents::SAMPLES[n].1 }));
+            self.send(client, &json!({ "id": id, "demo": shown }));
+        }
+        // Contestar a un agente: solo con una de las opciones que enseña ahora.
+        // Al de ejemplo, contestarle lo quita.
+        if let Some(answer) = message.get("agent_answer") {
+            let field = |key: &str| answer.get(key).and_then(Value::as_str).unwrap_or("");
+            if field("id").starts_with("demo:") {
+                self.demo = None;
+                let message = json!({ "agents": self.agents_view() });
+                self.broadcast(&message, |c| c.agents);
+            } else if let Some(agent) = self.agents.iter().find(|a| a.id == field("id"))
+                && !agent.keys.is_empty()
+                && agent.ask.as_ref().is_some_and(|ask| ask.options.iter().any(|o| o.key == field("key")))
+            {
+                // Una letra («Y») se pulsa como la pulsarías tú: en minúscula.
+                let key = field("key");
+                let key = if key.len() == 1 && key.chars().all(|c| c.is_ascii_alphabetic()) { key.to_ascii_lowercase() } else { key.to_string() };
+                let mut command: Vec<&str> = agent.keys.iter().map(String::as_str).collect();
+                command.push(&key);
+                orders::detach(&command);
+            }
         }
         if text("calendars").as_deref() == Some("sync")
             && let Some(jobs) = &self.calendars
@@ -867,7 +976,7 @@ impl Daemon {
             self.send(client, &reply);
         }
         if message.get("agents").and_then(Value::as_bool) == Some(true) {
-            let agents = json!({ "id": id, "agents": self.agents });
+            let agents = json!({ "id": id, "agents": self.agents_view() });
             self.send(client, &agents);
         }
         if let Some(note) = message.get("note").and_then(Value::as_u64) {
@@ -1040,7 +1149,8 @@ impl Daemon {
     }
 
     #[allow(clippy::too_many_arguments)]
-    fn answer(&mut self, client: u64, id: Value, said: &str, source: &str, parse: Option<&Parse>, handler: &str, outcome: Outcome) {
+    /// Contesta, lo apunta en el diario y devuelve su fila, si la hay.
+    fn answer(&mut self, client: u64, id: Value, said: &str, source: &str, parse: Option<&Parse>, handler: &str, outcome: Outcome) -> Option<i64> {
         let shown = self.shown_card.take();
         let card = shown.as_ref().map(|c| c.to_string()).unwrap_or_default();
         let mut logged = None;
@@ -1056,6 +1166,7 @@ impl Daemon {
                 .order(now(), source, said, parse.map(|p| p.intent.as_str()), &args, handler, outcome.ok, &answer, &card)
                 .and_then(|row| journal.asked(1, Some(row)).pop());
         }
+        let row = logged.as_ref().and_then(|one| one["id"].as_i64());
         // Al historial del centro de control; lo que se pide desde la línea de órdenes no es una consulta tuya.
         if let Some(one) = logged
             && source != "cli"
@@ -1090,6 +1201,7 @@ impl Daemon {
         {
             let _ = mouth.send(tts::Say::Text { text: tts::spoken(&outcome.say), style: self.settings.style() });
         }
+        row
     }
 
     /// Lo que la gramática no entiende, al modelo: lo dicho por la entrada
@@ -1099,12 +1211,98 @@ impl Daemon {
         !self.settings.brain.is_empty() || !self.settings.llm.is_empty()
     }
 
-    /// Que Veyl enseñe que está pensando en algo.
-    fn ponder(&mut self, said: &str) {
+    /// Que Veyl enseñe que está pensando en algo. Devuelve su número.
+    fn ponder(&mut self, said: &str) -> u64 {
+        self.ponder_as(said, json!({}))
+    }
+
+    /// Lo mismo, con algo más que enseñar (si se puede parar, lo que va haciendo).
+    fn ponder_as(&mut self, said: &str, extra: Value) -> u64 {
         self.pondering += 1;
-        self.pondered = json!({ "said": said, "since": now() });
+        self.thought += 1;
+        self.pondered = json!({ "said": said, "since": now(), "n": self.thought });
+        if let (Some(all), Some(extra)) = (self.pondered.as_object_mut(), extra.as_object()) {
+            all.extend(extra.clone());
+        }
         let thinking = json!({ "thinking": self.pondered });
         self.broadcast(&thinking, |c| c.shell);
+        self.thought
+    }
+
+    /// Lo que va haciendo el cerebro con la pregunta `n`, a lo que enseña Veyl:
+    /// lo último que hace (sin repetir lo mismo dos veces seguidas) y las
+    /// páginas que encuentra, una por sitio.
+    fn stepped(&mut self, n: u64, step: brain::Step) {
+        if self.pondered.get("n").and_then(Value::as_u64) != Some(n) || !self.asking.contains_key(&n) {
+            return;
+        }
+        let list = |key: &str, pondered: &Value| -> Vec<Value> { pondered.get(key).and_then(Value::as_array).cloned().unwrap_or_default() };
+        match step {
+            brain::Step::Doing { icon, text } => {
+                let mut steps = list("steps", &self.pondered);
+                if steps.last().is_some_and(|last| last["texto"] == text) {
+                    return;
+                }
+                steps.push(json!({ "icono": icon, "texto": text, "at": now() }));
+                let from = steps.len().saturating_sub(12);
+                self.pondered["steps"] = json!(steps[from..]);
+            }
+            brain::Step::Found(found) => {
+                let mut sources = list("sources", &self.pondered);
+                let before = sources.len();
+                for source in found {
+                    let host = brain::host(&source.url);
+                    if sources.len() < 8 && !host.is_empty() && !sources.iter().any(|s| s["host"] == host) {
+                        sources.push(json!({ "titulo": source.title, "host": host, "url": source.url }));
+                    }
+                }
+                if sources.len() == before {
+                    return;
+                }
+                self.pondered["sources"] = json!(sources);
+            }
+        }
+        let thinking = json!({ "thinking": self.pondered });
+        self.broadcast(&thinking, |c| c.shell);
+    }
+
+    /// Deja de pensar la pregunta `n`: se le dice al modelo que pare y Veyl
+    /// deja de enseñarla ya; cuando conteste, se tira.
+    fn stop_thinking(&mut self, n: u64) {
+        let Some((stop, _)) = self.asking.remove(&n) else {
+            return;
+        };
+        stop.store(true, Ordering::Relaxed);
+        self.card = None;
+        if self.cover.as_ref().is_some_and(|(at, _)| *at == n) {
+            self.cover = None;
+        }
+        self.pondered_one();
+    }
+
+    /// La portada de la tarjeta de la pregunta `n`: vale la primera que llega.
+    /// Se le pone a la tarjeta que se está componiendo o, si ya se apuntó en
+    /// el diario, a la de allí; y Veyl se la pone a la que enseña, si es esa.
+    fn covered(&mut self, n: u64, url: String) {
+        let Some((_, logged)) = self.cover.take_if(|(at, _)| *at == n) else {
+            return;
+        };
+        if self.asking.contains_key(&n)
+            && let Some(card) = self.card.as_mut()
+        {
+            card["imagen"] = json!(url);
+        }
+        if let Some((mut card, row)) = logged
+            && let Some(journal) = &mut self.journal
+        {
+            card["imagen"] = json!(url);
+            if journal.order_card(row, &card.to_string())
+                && let Some(one) = journal.asked(1, Some(row)).pop()
+            {
+                self.broadcast(&json!({ "asked_one": one }), |c| c.shell);
+            }
+        }
+        self.broadcast(&json!({ "card_patch": { "n": n, "imagen": url } }), |c| c.shell);
     }
 
     /// Ha acabado de pensar una; si no queda ninguna, Veyl deja de enseñarlo.
@@ -1189,19 +1387,18 @@ impl Daemon {
     }
 
     fn ask_model(&mut self, client: u64, id: Value, said: &str, source: &str) {
-        // Que Veyl enseñe que está pensando.
-        self.pondering += 1;
+        // Que Veyl enseñe que está pensando y lo que va haciendo; se puede parar.
         self.card = None;
-        self.picture = None;
-        self.pondered = json!({ "said": said, "since": now() });
-        let thinking = json!({ "thinking": self.pondered });
-        self.broadcast(&thinking, |c| c.shell);
+        self.cover = None;
+        let n = self.ponder_as(said, json!({ "stop": true, "steps": [], "sources": [] }));
+        let stop = Arc::new(AtomicBool::new(false));
+        self.asking.insert(n, (stop.clone(), said.to_string()));
         let (tx, said, source) = (self.tx.clone(), said.to_string(), source.to_string());
         if self.settings.brain.is_empty() {
             let command = self.settings.llm.clone();
             thread::spawn(move || {
                 let outcome = model(&command, &said, &source);
-                let _ = tx.send(Event::Answered { client, id, said, source, outcome });
+                let _ = tx.send(Event::Answered { client, id, said, source, outcome, n });
             });
             return;
         }
@@ -1221,8 +1418,11 @@ impl Daemon {
         let context = context.to_string();
         let windows = crate::system::seen(self);
         thread::spawn(move || {
-            let ask = brain::Ask { said: said.clone(), history, context };
-            let (tools, from) = (tx.clone(), source.clone());
+            let ask = brain::Ask { said: said.clone(), history, context, stop };
+            let (tools, from, steps) = (tx.clone(), source.clone(), tx.clone());
+            let progress = move |step: brain::Step| {
+                let _ = steps.send(Event::Step { n, step });
+            };
             let tool = move |name: &str, input: &Value| -> String {
                 // Medir tarda: se mide en este hilo, sin parar al daemon.
                 if name == "sistema" {
@@ -1235,7 +1435,7 @@ impl Daemon {
                 }
                 wait.recv_timeout(Duration::from_secs(60)).unwrap_or_else(|_| "Veyl no contesta".into())
             };
-            let outcome = match brain::ask(&settings, &ask, &tool, &socket) {
+            let outcome = match brain::ask(&settings, &ask, &tool, &progress, &socket) {
                 Ok(text) if !brain::plain(&text).is_empty() => {
                     let text = brain::plain(&text);
                     let (say, rest) = text.split_once('\n').map(|(a, b)| (a.trim().to_string(), Some(b.trim().to_string()))).unwrap_or((text.clone(), None));
@@ -1245,8 +1445,63 @@ impl Daemon {
                 Ok(_) => Outcome { ok: true, say: String::new(), answer: None },
                 Err(why) => Outcome::fail(why),
             };
-            let _ = tx.send(Event::Answered { client, id, said, source, outcome });
+            let _ = tx.send(Event::Answered { client, id, said, source, outcome, n });
         });
+    }
+
+    /// Lo que contestó el modelo a la pregunta `n`. Si se paró, solo se le dice
+    /// a quien preguntó: Veyl ya dejó de enseñarla.
+    fn answered(&mut self, client: u64, id: Value, said: &str, source: &str, outcome: Outcome, n: u64) {
+        if self.asking.remove(&n).is_none() {
+            self.send(client, &json!({ "id": id, "ok": false, "say": brain::STOPPED }));
+            return;
+        }
+        self.pondered_one();
+        if outcome.ok && !self.settings.brain.is_empty() {
+            let answer = outcome.answer.as_ref().map_or(outcome.say.clone(), |a| format!("{}\n{a}", outcome.say));
+            self.talk.push((Instant::now(), said.to_string(), answer));
+        }
+        let handler = if self.settings.brain.is_empty() { "llm".to_string() } else { format!("brain:{}", self.settings.brain) };
+        let mut outcome = outcome;
+        if outcome.ok && outcome.say.is_empty() {
+            match self.card.as_ref().and_then(|c| c["titulo"].as_str()).filter(|t| !t.is_empty()) {
+                Some(title) => outcome.say = title.to_string(),
+                None => outcome = Outcome::fail("El modelo no ha dicho nada"),
+            }
+        }
+        // Sin tarjeta del modelo, una respuesta larga no cabe en la
+        // notificación: va en una tarjeta hecha con su texto.
+        if self.card.is_none() && outcome.ok && (outcome.say.chars().count() > 110 || outcome.say.contains('\n')) {
+            self.card = Some(crate::card::from_text(&outcome.say));
+        }
+        // Con tarjeta, Veyl la enseña en la isla en vez de la notificación. Si
+        // ya la enseñaba mientras el modelo acababa (`live`), es la misma: solo
+        // gana la frase. Si el modelo ha fallado después, se queda como estaba.
+        let card = self.card.take();
+        if !outcome.ok && card.is_some() {
+            self.broadcast(&json!({ "card_patch": { "n": n, "live": false } }), |c| c.shell);
+        }
+        if let Some(mut card) = card.filter(|_| outcome.ok && (source == "diary" || self.clients.values().any(|c| c.shell))) {
+            card["n"] = json!(n);
+            if source == "diary" {
+                // Desde la vista del diario la tarjeta va con la respuesta, ahí mismo.
+                card["say"] = json!(outcome.say);
+                card["said"] = json!(said);
+                self.shown_card = Some(card);
+            } else {
+                self.present(card, &outcome, said);
+            }
+        }
+        let shown = self.shown_card.clone();
+        let row = self.answer(client, id, said, source, None, &handler, outcome);
+        self.carded = false;
+        // Si la portada aún no ha llegado, irá a la tarjeta apuntada en el diario.
+        if let (Some(card), Some(row)) = (shown, row)
+            && let Some((at, logged @ None)) = &mut self.cover
+            && *at == n
+        {
+            *logged = Some((card, row));
+        }
     }
 
     /// Lo que pide el cerebro: una orden, el contexto o el diario. Lo que
@@ -1268,23 +1523,38 @@ impl Daemon {
             "contexto" => self.context().to_string(),
             "mostrar" => match crate::card::clean(input) {
                 Some(card) => {
-                    self.picture = None;
-                    // Se prueba en los tres primeros enlaces a la vez: vale el primero que llegue.
+                    // De la pregunta al cerebro en marcha más reciente.
+                    let n = self.asking.keys().max().copied().unwrap_or(0);
+                    // Lo que se le olvidó (las preguntas, los enlaces) se añade a la que ya había.
+                    let card = self.card.as_ref().and_then(|old| crate::card::merge(old, &card)).unwrap_or(card);
+                    // Sin portada, se busca en los tres primeros enlaces a la vez: vale la primera que llegue.
+                    self.cover = None;
                     let pages = crate::card::links(&card);
-                    if card["imagen"] == "" && !pages.is_empty() {
-                        let (tx, rx) = std::sync::mpsc::channel();
+                    if card["imagen"] == "" && !pages.is_empty() && n > 0 {
+                        self.cover = Some((n, None));
                         for page in pages.into_iter().take(3) {
-                            let tx = tx.clone();
+                            let tx = self.tx.clone();
                             thread::spawn(move || {
                                 if let Some(url) = crate::card::picture(&page) {
-                                    tx.send(url).ok();
+                                    let _ = tx.send(Event::Cover { n, url });
                                 }
                             });
                         }
-                        self.picture = Some((rx, Instant::now()));
+                    }
+                    // Se enseña ya, sin esperar a que el modelo acabe de escribir:
+                    // al contestar se completa (la frase, la portada) sin rehacerse.
+                    if source != "diary"
+                        && let Some((_, said)) = self.asking.get(&n)
+                        && self.clients.values().any(|c| c.shell)
+                    {
+                        let mut live = card.clone();
+                        live["n"] = json!(n);
+                        live["said"] = json!(said);
+                        live["live"] = json!(true);
+                        self.broadcast(&json!({ "card": live }), |c| c.shell);
                     }
                     self.card = Some(card);
-                    "Tarjeta lista. Ahora contesta con tu frase corta.".into()
+                    "Tarjeta lista: el usuario ya la ve. Ahora contesta solo con tu frase corta.".into()
                 }
                 // La de antes, si la hay, se queda: no se tapa con una vacía.
                 None if self.card.is_some() => "Esa tarjeta no tiene ninguna pieza que Veyl sepa pintar: se queda la que ya enseñaste. No la vuelvas a mandar; contesta con tu frase corta.".into(),
@@ -1427,6 +1697,13 @@ impl Daemon {
                 self.idle = away;
                 self.presence(now(), before);
             }
+            Event::Held(held) => {
+                let before = self.absence();
+                self.held = held;
+                self.presence(now(), before);
+                let awake = self.awake();
+                self.broadcast(&awake, |c| c.shell);
+            }
             Event::Tick => self.tick(),
             Event::Join(id, stream) => {
                 self.clients.insert(id, Client { stream, shell: false, agents: false });
@@ -1459,46 +1736,9 @@ impl Daemon {
                 let out = self.notes.expire(Instant::now());
                 self.notes_out(out);
             }
-            Event::Answered { client, id, said, source, outcome } => {
-                self.pondered_one();
-                if outcome.ok && !self.settings.brain.is_empty() {
-                    let answer = outcome.answer.as_ref().map_or(outcome.say.clone(), |a| format!("{}\n{a}", outcome.say));
-                    self.talk.push((Instant::now(), said.clone(), answer));
-                }
-                let handler = if self.settings.brain.is_empty() { "llm".to_string() } else { format!("brain:{}", self.settings.brain) };
-                let mut outcome = outcome;
-                if outcome.ok && outcome.say.is_empty() {
-                    match self.card.as_ref().and_then(|c| c["titulo"].as_str()).filter(|t| !t.is_empty()) {
-                        Some(title) => outcome.say = title.to_string(),
-                        None => outcome = Outcome::fail("El modelo no ha dicho nada"),
-                    }
-                }
-                // Sin tarjeta del modelo, una respuesta larga no cabe en la
-                // notificación: va en una tarjeta hecha con su texto.
-                if self.card.is_none() && outcome.ok && (outcome.say.chars().count() > 110 || outcome.say.contains('\n')) {
-                    self.card = Some(crate::card::from_text(&outcome.say));
-                }
-                // Con tarjeta, Veyl la enseña en la isla en vez de la notificación.
-                let card = self.card.take().filter(|_| outcome.ok && (source == "diary" || self.clients.values().any(|c| c.shell)));
-                let picture = self.picture.take();
-                if let Some(mut card) = card {
-                    if let Some(url) = picture.and_then(|(rx, since)| {
-                        rx.recv_timeout(Duration::from_millis(3500).saturating_sub(since.elapsed()).max(Duration::from_millis(200))).ok()
-                    }) {
-                        card["imagen"] = json!(url);
-                    }
-                    if source == "diary" {
-                        // Desde la vista del diario la tarjeta va con la respuesta, ahí mismo.
-                        card["say"] = json!(outcome.say);
-                        card["said"] = json!(said);
-                        self.shown_card = Some(card);
-                    } else {
-                        self.present(card, &outcome, &said);
-                    }
-                }
-                self.answer(client, id, &said, &source, None, &handler, outcome);
-                self.carded = false;
-            }
+            Event::Answered { client, id, said, source, outcome, n } => self.answered(client, id, &said, &source, outcome, n),
+            Event::Step { n, step } => self.stepped(n, step),
+            Event::Cover { n, url } => self.covered(n, url),
             Event::Sensed { client, id, said, source, parse, outcome, card } => {
                 self.pondered_one();
                 if let Some(card) = card
@@ -1682,6 +1922,13 @@ pub fn run() -> Result<(), String> {
     {
         let tx = tx.clone();
         thread::spawn(move || {
+            let why = awake::watch(tx);
+            eprintln!("veyld: sin atender lo que pide no bloquear: {why}");
+        });
+    }
+    {
+        let tx = tx.clone();
+        thread::spawn(move || {
             let why = media::watch(tx);
             if !why.is_empty() {
                 eprintln!("veyld: sin saber qué suena: {why}");
@@ -1775,6 +2022,83 @@ mod tests {
         d.settings.brain.clear();
         d.settings.llm.clear();
         d
+    }
+
+    #[test]
+    fn thinking_tells_its_steps_and_can_be_stopped() {
+        let mut d = daemon();
+        d.settings.journal = true;
+        let said = "¿cuándo sale GTA 6?";
+        let n = d.ponder_as(said, json!({ "stop": true }));
+        d.asking.insert(n, (Arc::default(), said.into()));
+        let search = brain::Step::Doing { icon: "magnifying-glass", text: "Busca «GTA 6»".into() };
+        d.stepped(n, search.clone());
+        d.stepped(n, search.clone());
+        let page = |url: &str| brain::Source { title: String::new(), url: url.into() };
+        d.stepped(n, brain::Step::Found(vec![page("https://www.ign.com/a"), page("https://ign.com/b"), page("https://rockstargames.com/VI")]));
+        // Lo de otra pregunta no se mezcla.
+        d.stepped(n + 1, brain::Step::Doing { icon: "globe", text: "Lee otra.com".into() });
+        assert_eq!(d.pondered["steps"].as_array().unwrap().len(), 1);
+        assert_eq!(d.pondered["steps"][0]["texto"], "Busca «GTA 6»");
+        let hosts: Vec<&str> = d.pondered["sources"].as_array().unwrap().iter().map(|s| s["host"].as_str().unwrap()).collect();
+        assert_eq!(hosts, ["ign.com", "rockstargames.com"]);
+        // La tarjeta se guarda para cuando conteste.
+        d.tool("mostrar", &json!({ "titulo": "GTA VI", "bloques": [{ "tipo": "texto", "texto": "Sale en 2026" }] }), "launcher");
+        assert!(d.card.is_some());
+        // Se para: deja de enseñarse ya, y lo que conteste después se tira.
+        let stop = d.asking[&n].0.clone();
+        d.stop_thinking(n);
+        assert!(stop.load(Ordering::Relaxed));
+        assert!(d.pondered.is_null() && d.card.is_none());
+        d.answered(0, json!(1), said, "launcher", Outcome { ok: true, say: "Sale el 19".into(), answer: None }, n);
+        assert_eq!(d.pondering, 0);
+        assert!(d.talk.is_empty());
+        assert!(d.journal.as_ref().unwrap().asked(5, None).is_empty());
+    }
+
+    #[test]
+    fn talk_survives_a_restart() {
+        let mut journal = Journal::memory();
+        let at = now();
+        journal.order(at - 20 * 60_000, "launcher", "algo de hace rato", None, "", "brain:claude-code", true, "Viejo", "");
+        journal.order(at - 60_000, "launcher", "fotos de sastrerías", None, "", "brain:claude-code", true, "Te dejo fotos\nDe Savile Row", "");
+        journal.order(at - 30_000, "launcher", "sube el volumen", Some("volume.up"), "", "grammar", true, "Volumen 40", "");
+        journal.order(at - 10_000, "launcher", "¿qué es esto?", None, "", "brain:claude-code", false, "Claude ha fallado", "");
+        let talk = journal.talk(at - 600_000);
+        assert_eq!(talk.len(), 1);
+        assert_eq!((talk[0].1.as_str(), talk[0].2.as_str()), ("fotos de sastrerías", "Te dejo fotos\nDe Savile Row"));
+        let mut d = daemon();
+        d.settings.journal = true;
+        d.journal = Some(journal);
+        d.recall_talk();
+        assert_eq!(d.talk.len(), 1);
+        assert!(d.talk[0].0.elapsed() >= Duration::from_secs(59));
+        // Sin diario no se recuerda nada.
+        d.settings.journal = false;
+        d.talk.clear();
+        d.recall_talk();
+        assert!(d.talk.is_empty());
+    }
+
+    #[test]
+    fn a_late_cover_reaches_the_journal() {
+        let mut d = daemon();
+        d.settings.journal = true;
+        let n = d.ponder_as("¿qué es Veyl?", json!({}));
+        d.asking.insert(n, (Arc::default(), "¿qué es Veyl?".into()));
+        d.card =
+            crate::card::clean(&json!({ "titulo": "Veyl", "bloques": [{ "tipo": "enlaces", "items": [{ "titulo": "Web", "url": "https://veyl.dev" }] }] }));
+        d.cover = Some((n, None));
+        d.answered(0, json!(1), "¿qué es Veyl?", "diary", Outcome { ok: true, say: "Un escritorio".into(), answer: None }, n);
+        assert!(matches!(&d.cover, Some((at, Some(_))) if *at == n));
+        // Otra pregunta no se la lleva; la suya, sí, y una segunda ya no cuenta.
+        d.covered(n + 1, "https://otra/b.jpg".into());
+        d.covered(n, "https://veyl.dev/og.jpg".into());
+        d.covered(n, "https://veyl.dev/otra.jpg".into());
+        let rows = d.journal.as_ref().unwrap().asked(1, None);
+        assert_eq!(rows[0]["card"]["imagen"], "https://veyl.dev/og.jpg");
+        assert_eq!(rows[0]["card"]["say"], "Un escritorio");
+        assert!(d.cover.is_none());
     }
 
     #[test]

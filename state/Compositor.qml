@@ -2,13 +2,15 @@ pragma Singleton
 
 import QtQuick
 import Quickshell
+import Quickshell.Hyprland
 import Quickshell.Io
 import qs
 
 // Todo lo que Veyl le pide a Hyprland: forma y color de las ventanas según
-// los tokens, las teclas del vistazo, del modo escuchar, de la entrada y
-// del bloqueo, y lo que se ha cambiado en los ajustes (teclado, ratón y
-// pantallas), que se vuelve a poner en cada arranque.
+// los tokens, las teclas del vistazo y de contestar a los agentes (Super+Y,
+// A, N, O), del modo escuchar, de la entrada y del bloqueo, y lo que se ha cambiado en los ajustes (teclado, ratón y
+// pantallas), que se vuelve a poner en cada arranque y cada vez que Hyprland
+// recarga su configuración (si no, se perdería: Super dejaría de abrir el vistazo).
 Singleton {
     id: root
 
@@ -50,6 +52,11 @@ Singleton {
         veyl_binds = {}
         for _, key in ipairs({ "Super_L", "Super_R" }) do
             table.insert(veyl_binds, hl.bind(key, hl.dsp.global("veyl:glance"), { non_consuming = true, ignore_mods = true }))
+        end
+        -- Al agente que pregunta: Super+Y la primera opción, Super+A la
+        -- segunda, Super+N la que dice que no y Super+O ir a él.
+        for key, name in pairs({ Y = "agent-accept", A = "agent-second", N = "agent-deny", O = "agent-open" }) do
+            table.insert(veyl_binds, hl.bind("SUPER + " .. key, hl.dsp.global("veyl:" .. name)))
         end
         -- La entrada y los ajustes aparecen y se van con su isla: sin
         -- animación de Hyprland encima. Las reglas no se quitan, se apagan.
@@ -117,6 +124,16 @@ Singleton {
         marked = needing;
         if (lua.length > 0)
             run(lua.join("\n"));
+    }
+
+    // Hyprland ha recargado su configuración: lo puesto en caliente se ha ido.
+    Connections {
+        target: Hyprland
+
+        function onRawEvent(event: HyprlandEvent): void {
+            if (event.name === "configreloaded" && root.started)
+                Qt.callLater(root.start);
+        }
     }
 
     Component {

@@ -38,6 +38,35 @@ Scope {
     }
     onAlmanacChanged: if (almanac) calendar.reset()
 
+    // La isla del contexto, igual: con el puntero encima se abre en la torre,
+    // para cambiar de nivel solo con el ratón.
+    property bool tower: false
+    property real wheel: 0  // giro acumulado de la rueda, hasta un paso
+    onTowerWantedChanged: {
+        if (towerWanted) {
+            towerGrace.stop();
+            if (!root.tower)
+                towerIntent.restart();
+        } else {
+            towerIntent.stop();
+            if (root.tower)
+                towerGrace.restart();
+        }
+    }
+    readonly property bool towerWanted: context.hovered
+
+    Timer {
+        id: towerIntent
+        interval: 60
+        onTriggered: root.tower = true
+    }
+
+    Timer {
+        id: towerGrace
+        interval: 180
+        onTriggered: root.tower = false
+    }
+
     Timer {
         id: intent
         interval: 60
@@ -67,18 +96,24 @@ Scope {
             right: true
         }
         // Hasta donde llega la isla del contexto abierta, rebote incluido.
-        implicitHeight: Math.max(Tokens.island, tower.implicitHeight) + root.below
+        // (y la de un agente que pregunta, que crece hacia abajo).
+        implicitHeight: Math.max(Tokens.island, tower.implicitHeight, agents.implicitHeight) + root.below
         // Se reserva el alto de una isla; las ventanas ya dejan `gap` debajo.
         exclusiveZone: Tokens.gapTop - Tokens.gap
         color: "transparent"
-        // Solo los agentes reciben el puntero; lo demás pasa a las ventanas.
+        // Solo la isla del contexto y los agentes reciben el puntero; lo
+        // demás pasa a las ventanas.
         mask: Region {
-            regions: agents.shown ? agents.areas : []
+            regions: [...(root.focused ? [lead.area] : []), ...(agents.shown ? agents.areas : [])]
         }
+
         // Sobre las ventanas, para poder abrirse encima de ellas; la pantalla
         // completa lo tapa igualmente.
         WlrLayershell.layer: WlrLayer.Top
         WlrLayershell.namespace: "veyl-base"
+        // El teclado, solo con el puntero sobre un agente que pregunta: sus
+        // teclas contestan. Al apartarlo, vuelve a la ventana de antes.
+        WlrLayershell.keyboardFocus: agents.listening ? WlrKeyboardFocus.Exclusive : WlrKeyboardFocus.None
 
         // Superior izquierda: en qué nivel estás y qué hay en él. Vistazo: se
         // abre y enseña todos los niveles.
@@ -86,14 +121,34 @@ Scope {
             id: lead
             shown: root.focused
 
+            // Lo que de ella recibe el puntero. Va aquí, junto a la isla, como
+            // en los agentes: suelto en la ventana o en `root` no seguía a la
+            // isla y la máscara se quedaba sin ella.
+            readonly property Region area: Region {
+                item: context
+            }
+
             Island {
                 id: context
 
-                expanded: Glance.open
+                expanded: Glance.open || root.tower
                 detail: Tower {
                     id: tower
                     monitor: root.monitor
                     levels: root.levels
+                }
+
+                // La rueda sube o baja de nivel.
+                WheelHandler {
+                    parent: context
+                    acceptedDevices: PointerDevice.Mouse | PointerDevice.TouchPad
+                    onWheel: event => {
+                        root.wheel += event.angleDelta.y;
+                        if (Math.abs(root.wheel) >= 120) {
+                            Contexts.step(root.monitor, root.wheel > 0 ? -1 : 1);
+                            root.wheel = 0;
+                        }
+                    }
                 }
 
                 Gauge {

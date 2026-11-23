@@ -9,6 +9,7 @@
 
 mod agents;
 mod apps;
+mod awake;
 mod brain;
 mod bus;
 mod calendars;
@@ -478,13 +479,33 @@ fn main() -> ExitCode {
             Ok(reply) => show(&reply),
             Err(why) => fail(why),
         },
-        Some("agents") => match ask(json!({ "agents": true })) {
-            Ok(reply) => {
-                println!("{}", serde_json::to_string_pretty(&reply["agents"]).unwrap_or_default());
-                ExitCode::SUCCESS
+        Some("agents") if args.get(1).map(String::as_str) == Some("demo") => {
+            // «veyld agents demo» la siguiente; «… 3», la tercera; «… off», fuera.
+            let which = match args.get(2).map(String::as_str) {
+                None | Some("next") => json!("next"),
+                Some("off") => json!("off"),
+                Some(n) => match n.parse::<u64>() {
+                    Ok(n) if n > 0 => json!(n - 1),
+                    _ => return fail(format!("¿qué ejemplo? (1 a {}, next u off)", agents::SAMPLES.len())),
+                },
+            };
+            match ask(json!({ "agents_demo": which })) {
+                Ok(reply) => {
+                    match reply.get("demo").filter(|d| !d.is_null()) {
+                        Some(d) => println!("Ejemplo {} de {}: {} ({})", d["n"], d["of"], d["name"].as_str().unwrap_or(""), d["agent"].as_str().unwrap_or("")),
+                        None => println!("Sin agentes de ejemplo"),
+                    }
+                    ExitCode::SUCCESS
+                }
+                Err(why) => fail(why),
             }
-            Err(why) => fail(why),
-        },
+        }
+        Some("agents") => {
+            // Sin el daemon, se mira aquí mismo (sin la carga de CPU de un segundo antes).
+            let agents = ask(json!({ "agents": true })).map(|reply| reply["agents"].clone()).unwrap_or_else(|_| json!(agents::Watcher::new().look()));
+            println!("{}", serde_json::to_string_pretty(&agents).unwrap_or_default());
+            ExitCode::SUCCESS
+        }
         Some("hear") if args.len() == 2 => hear(&args[1]),
         Some("speak") if args.len() > 1 => speak(&args[1..]),
         Some("mcp") => brain::mcp(),

@@ -29,6 +29,28 @@ PanelWindow {
     WlrLayershell.namespace: "veyl-launcher"
     WlrLayershell.keyboardFocus: Launcher.open ? WlrKeyboardFocus.Exclusive : WlrKeyboardFocus.None
 
+    // Al capturar desde aquí, se aparta de golpe y no vuelve hasta la próxima.
+    property bool tucked: false
+    contentItem.opacity: tucked ? 0 : 1
+
+    Connections {
+        target: Shot
+
+        function onHidingChanged(): void {
+            if (Shot.hiding)
+                root.tucked = true;
+        }
+    }
+
+    Connections {
+        target: Launcher
+
+        function onOpenChanged(): void {
+            if (Launcher.open)
+                root.tucked = false;
+        }
+    }
+
     MouseArea {
         id: outside
         anchors.fill: parent

@@ -25,6 +25,27 @@ Singleton {
             radio.running = true;
     }
 
+    // El cuentagotas: copia el color y lo avisa con una muestra suya de
+    // imagen. Si se cancela (Esc), hyprpicker no dice nada y no hay aviso.
+    // Sin -q: en hyprpicker calla también el color que imprime.
+    readonly property string picker: `
+        hex=$(hyprpicker -b -f hex 2>/dev/null | grep -o '#[0-9A-Fa-f]\\{6\\}' | head -n 1)
+        [ -n "$hex" ] || exit 0
+        printf %s "$hex" | wl-copy
+        dir="\${XDG_CACHE_HOME:-$HOME/.cache}/veyl/colors"
+        swatch="$dir/\${hex#\\#}.png"
+        mkdir -p "$dir"
+        [ -s "$swatch" ] || python3 -c '
+import struct, sys, zlib
+r, g, b = (int(sys.argv[1][i:i + 2], 16) for i in (1, 3, 5))
+side = 64
+chunk = lambda kind, data: struct.pack(">I", len(data)) + kind + data + struct.pack(">I", zlib.crc32(kind + data))
+rows = (b"\\0" + bytes((r, g, b)) * side) * side
+png = b"\\x89PNG\\r\\n\\x1a\\n" + chunk(b"IHDR", struct.pack(">IIBBBBB", side, side, 8, 2, 0, 0, 0)) + chunk(b"IDAT", zlib.compress(rows)) + chunk(b"IEND", b"")
+open(sys.argv[2], "wb").write(png)
+' "$hex" "$swatch" 2>/dev/null || swatch=""
+        notify-send -a Veyl -i color-select \${swatch:+-h "string:image-path:$swatch"} "Color copiado" "$hex"`
+
     function shell(script: string): void {
         Quickshell.execDetached(["sh", "-c", script]);
     }
@@ -127,14 +148,15 @@ Singleton {
             list.push(order("clipboard-clear", "Vaciar el historial del portapapeles", "Veyl", "broom", "borrar limpiar clipboard clear", () => Clipboard.run("clear", ""), { stay: true, confirm: true }));
         if (Calc.available)
             list.push(order("rates", "Actualizar los tipos de cambio", "Veyl", "currency-eur", "divisas monedas calculadora qalc exchange rates", () => Calc.update()));
+        if (Gallery.count > 0)
+            list.push(order("cards", "Galería de tarjetas", "Veyl", "cards", "ejemplos tarjetas cerebro respuestas piezas demo previsualizar", () => Gallery.show(0)));
 
-        if (has("grim") && has("wl-copy")) {
-            if (has("slurp"))
-                list.push(order("shot-area", "Capturar una zona de la pantalla", "Pantalla", "selection", "captura screenshot recorte", () => after('grim -g "$(slurp)" - | wl-copy --type image/png'), { verb: "Capturar" }));
-            list.push(order("shot-screen", "Capturar la pantalla", "Pantalla", "monitor", "captura screenshot entera", () => after(`grim -o '${Launcher.monitor}' - | wl-copy --type image/png`), { verb: "Capturar" }));
-        }
+        if (Shot.zones)
+            list.push(order("shot-area", "Capturar una zona de la pantalla", "Pantalla", "selection", "captura screenshot recorte", () => Shot.take(Launcher.monitor, true, 0.05), { verb: "Capturar" }));
+        if (Shot.available)
+            list.push(order("shot-screen", "Capturar la pantalla", "Pantalla", "monitor", "captura screenshot entera", () => Shot.take(Launcher.monitor, false, 0.05), { verb: "Capturar" }));
         if (has("hyprpicker"))
-            list.push(order("picker", "Elegir un color de la pantalla", "Pantalla", "eyedropper", "cuentagotas color picker hex", () => after("hyprpicker -a")));
+            list.push(order("picker", "Elegir un color de la pantalla", "Pantalla", "eyedropper", "cuentagotas color picker hex", () => after(root.picker)));
 
         if (has("nmcli"))
             list.push(order("wifi", "Encender o apagar el Wi-Fi", "Red", "wifi-high", "wireless internet red", () => {

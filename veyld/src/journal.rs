@@ -472,6 +472,21 @@ impl Journal {
         self.db.execute("DELETE FROM orders WHERE id = ?1", params![id]).is_ok_and(|n| n > 0)
     }
 
+    /// Lo hablado con el cerebro desde `since` (lo dicho y lo que contestó), de
+    /// lo más antiguo a lo más reciente.
+    pub fn talk(&self, since: i64) -> Vec<(i64, String, String)> {
+        let sql = "SELECT time, said, answer FROM orders WHERE time >= ?1 AND ok = 1 AND handler LIKE 'brain:%' ORDER BY time, id";
+        let Ok(mut q) = self.db.prepare(sql) else {
+            return Vec::new();
+        };
+        q.query_map(params![since], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?))).map(|rows| rows.flatten().collect()).unwrap_or_default()
+    }
+
+    /// Cambia la tarjeta de una consulta ya apuntada (su portada llega después).
+    pub fn order_card(&mut self, id: i64, card: &str) -> bool {
+        self.db.execute("UPDATE orders SET card = ?1 WHERE id = ?2", params![card, id]).is_ok_and(|n| n > 0)
+    }
+
     /// Pone su página a lo mirado en un navegador desde `since`, cuando
     /// `url(app, título)` la sabe: el navegador la guarda unos segundos tarde.
     pub fn pages(&mut self, since: i64, mut url: impl FnMut(&str, &str) -> Option<String>) {

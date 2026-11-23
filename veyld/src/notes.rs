@@ -3,7 +3,7 @@
 //! o pasan los días que se guardan (`notificationDays` en settings.json).
 //! Una nota está viva (`live`) mientras su programa puede recibir lo que
 //! hagas con ella, y sale como aviso (`popup`) hasta que caduca: entonces
-//! se queda en el cajón. Veyl solo las pinta; lo que pasa con ellas se
+//! se queda guardada. Veyl solo las pinta; lo que pasa con ellas se
 //! decide aquí.
 
 use std::collections::HashMap;
@@ -241,7 +241,7 @@ impl Notes {
         out
     }
 
-    /// Su programa la retira: se queda en el cajón, ya sin vida, salvo una
+    /// Su programa la retira: se queda guardada, ya sin vida, salvo una
     /// pasajera, que se va.
     pub fn withdraw(&mut self, id: u32) -> Vec<Out> {
         // Una que ya no está (la descartaste, o pulsaste una acción) ya se cerró.
@@ -309,7 +309,7 @@ impl Notes {
         self.due.values().min().copied()
     }
 
-    /// Los avisos que han caducado pasan al cajón; uno pasajero se va.
+    /// Los avisos que han caducado se quedan guardados; uno pasajero se va.
     pub fn expire(&mut self, now: Instant) -> Vec<Out> {
         let mut gone: Vec<u32> = self.due.iter().filter(|(_, at)| **at <= now).map(|(&id, _)| id).collect();
         gone.sort_unstable();

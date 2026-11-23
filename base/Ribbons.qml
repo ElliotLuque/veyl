@@ -11,6 +11,13 @@ Item {
 
     property bool shown: true
     property list<Region> areas: []
+    // Alguna escucha el teclado (el puntero sobre un agente que pregunta).
+    readonly property bool listening: {
+        for (let i = 0; i < islands.count; i++)
+            if (islands.itemAt(i)?.plate?.listening)
+                return true;
+        return false;
+    }
 
     function collect(): void {
         const out = [];
@@ -47,7 +54,8 @@ Item {
     }
 
     implicitWidth: row.width
-    implicitHeight: Tokens.pod + Tokens.gap
+    // La más alta manda: la de un agente que pregunta crece hacia abajo.
+    implicitHeight: Math.max(Tokens.pod, row.height) + Tokens.gap
     opacity: show.value
     visible: opacity > 0 && Agents.list.count > 0
 
@@ -76,6 +84,10 @@ Item {
                 required property string provider
                 required property string name
                 required property string window
+                required property double since
+                required property string ask
+                required property string label
+                required property string cwd
                 readonly property Item plate: island
                 readonly property Region area: Region {
                     item: island
@@ -106,6 +118,10 @@ Item {
                     provider: slot.provider
                     name: slot.name
                     window: slot.window
+                    since: slot.since
+                    ask: slot.ask
+                    label: slot.label
+                    cwd: slot.cwd
                 }
             }
         }

@@ -63,8 +63,11 @@ Singleton {
         property int preset: 25
     }
 
+    // Cuatro veces por segundo: a uno por segundo, el temporizador (que no es
+    // exacto) cae justo en la frontera del segundo y lo que queda salta de
+    // dos en dos.
     Timer {
-        interval: 1000
+        interval: 250
         running: root.running
         repeat: true
         triggeredOnStart: true

@@ -1,7 +1,8 @@
 //! Las tarjetas que compone el cerebro: la respuesta a una pregunta, hecha a
 //! su medida (una lista, unas cifras, unos pasos, unos botones) y pintada por
 //! Veyl en la isla del centro, después de «Pensando». No es código: es un
-//! vocabulario fijo de piezas que Veyl sabe pintar. Lo que llega se limpia
+//! vocabulario fijo de piezas que Veyl sabe pintar, con un estilo de cabecera
+//! que elige el modelo; todo va en el acento del tema. Lo que llega se limpia
 //! aquí (longitudes, cuántas piezas, iconos que existen, solo enlaces web) y
 //! lo que no se entiende se tira.
 
@@ -12,6 +13,10 @@ use std::time::Duration;
 /// Los colores que puede pedir el modelo, para cosas pequeñas y con sentido:
 /// Veyl los toma del esquema (lo demás va siempre en el acento del tema).
 pub const COLORS: &[&str] = &["bien", "aviso", "mal", "neutro"];
+
+/// Cómo va su cabeza: con icono y título (`ficha`), con la imagen a sangre y
+/// el título grande debajo (`portada`) o con un título grande (`titular`).
+pub const STYLES: &[&str] = &["ficha", "portada", "titular"];
 
 /// Los iconos de Phosphor que puede usar una tarjeta (comprobados en la fuente).
 pub const ICONS: &[&str] = &[
@@ -118,6 +123,285 @@ pub const ICONS: &[&str] = &[
     "arrow-right",
     "trend-up",
     "trend-down",
+    "cloud-sun",
+    "cloud-moon",
+    "cloud-lightning",
+    "cloud-snow",
+    "cloud-fog",
+    "rainbow",
+    "tornado",
+    "sun-horizon",
+    "sun-dim",
+    "moon-stars",
+    "thermometer-hot",
+    "thermometer-cold",
+    "umbrella-simple",
+    "fork-knife",
+    "cooking-pot",
+    "chef-hat",
+    "bowl-steam",
+    "bowl-food",
+    "coffee-bean",
+    "pizza",
+    "hamburger",
+    "bread",
+    "egg",
+    "carrot",
+    "orange",
+    "avocado",
+    "cheese",
+    "pepper",
+    "cake",
+    "cookie",
+    "ice-cream",
+    "popcorn",
+    "wine",
+    "beer-stein",
+    "martini",
+    "soccer-ball",
+    "basketball",
+    "football",
+    "tennis-ball",
+    "volleyball",
+    "medal",
+    "flag-checkered",
+    "barbell",
+    "person-simple-run",
+    "person-simple-bike",
+    "person-simple-swim",
+    "bicycle",
+    "motorcycle",
+    "scooter",
+    "airplane-takeoff",
+    "bus",
+    "train-simple",
+    "boat",
+    "sailboat",
+    "suitcase-rolling",
+    "map-trifold",
+    "compass",
+    "mountains",
+    "island",
+    "tree",
+    "tree-palm",
+    "tent",
+    "campfire",
+    "gas-pump",
+    "charging-station",
+    "film-slate",
+    "film-reel",
+    "television",
+    "ticket",
+    "guitar",
+    "piano-keys",
+    "microphone-stage",
+    "vinyl-record",
+    "headphones",
+    "palette",
+    "paint-brush",
+    "books",
+    "atom",
+    "dna",
+    "microscope",
+    "planet",
+    "rocket-launch",
+    "heartbeat",
+    "pill",
+    "first-aid",
+    "tooth",
+    "baby",
+    "dog",
+    "cat",
+    "bird",
+    "fish",
+    "paw-print",
+    "plant",
+    "flower",
+    "crown",
+    "smiley",
+    "magic-wand",
+    "star-four",
+    "flame",
+    "check",
+    "checks",
+    "house-line",
+    "buildings",
+    "bank",
+    "money",
+    "coins",
+    "wallet",
+    "credit-card",
+    "piggy-bank",
+    "receipt",
+    "storefront",
+    "shopping-bag",
+    "chart-line-up",
+    "chart-line-down",
+    "chart-pie",
+    "chart-donut",
+    "calendar-check",
+    "calendar-star",
+    "clock-countdown",
+    "hourglass-high",
+    "t-shirt",
+    "sneaker",
+    "gavel",
+    "scales",
+    "shield-check",
+    "lock",
+    "key",
+    "currency-btc",
+    "music-note",
+    "device-mobile",
+    "laptop",
+    "person-simple-walk",
+];
+
+/// Lo que escribe el modelo en vez del nombre de un icono (en español, con
+/// emoji) y el icono que quería.
+const ALIASES: &[(&str, &str)] = &[
+    ("sol", "sun"),
+    ("soleado", "sun"),
+    ("despejado", "sun"),
+    ("luna", "moon"),
+    ("noche", "moon-stars"),
+    ("nube", "cloud"),
+    ("nubes", "cloud"),
+    ("nublado", "cloud"),
+    ("cubierto", "cloud"),
+    ("nube-sol", "cloud-sun"),
+    ("sol-nube", "cloud-sun"),
+    ("sol-nubes", "cloud-sun"),
+    ("intervalos", "cloud-sun"),
+    ("parcialmente-nublado", "cloud-sun"),
+    ("lluvia", "cloud-rain"),
+    ("nube-lluvia", "cloud-rain"),
+    ("lluvioso", "cloud-rain"),
+    ("chubascos", "cloud-rain"),
+    ("llovizna", "cloud-rain"),
+    ("tormenta", "cloud-lightning"),
+    ("rayo", "lightning"),
+    ("nieve", "cloud-snow"),
+    ("nevada", "cloud-snow"),
+    ("niebla", "cloud-fog"),
+    ("viento", "wind"),
+    ("temperatura", "thermometer"),
+    ("calor", "thermometer-hot"),
+    ("frio", "thermometer-cold"),
+    ("paraguas", "umbrella"),
+    ("gota", "drop"),
+    ("humedad", "drop"),
+    ("comida", "fork-knife"),
+    ("cocina", "cooking-pot"),
+    ("cocinar", "cooking-pot"),
+    ("receta", "chef-hat"),
+    ("huevo", "egg"),
+    ("huevos", "egg"),
+    ("cafe", "coffee"),
+    ("vino", "wine"),
+    ("cerveza", "beer-stein"),
+    ("pan", "bread"),
+    ("tarta", "cake"),
+    ("pastel", "cake"),
+    ("futbol", "soccer-ball"),
+    ("balon", "soccer-ball"),
+    ("baloncesto", "basketball"),
+    ("tenis", "tennis-ball"),
+    ("trofeo", "trophy"),
+    ("copa", "trophy"),
+    ("medalla", "medal"),
+    ("deporte", "trophy"),
+    ("correr", "person-simple-run"),
+    ("bici", "bicycle"),
+    ("bicicleta", "bicycle"),
+    ("coche", "car"),
+    ("tren", "train"),
+    ("avion", "airplane"),
+    ("viaje", "suitcase-rolling"),
+    ("maleta", "suitcase-rolling"),
+    ("mapa", "map-trifold"),
+    ("ubicacion", "map-pin"),
+    ("lugar", "map-pin"),
+    ("montana", "mountains"),
+    ("playa", "island"),
+    ("musica", "music-notes"),
+    ("cancion", "music-note"),
+    ("pelicula", "film-slate"),
+    ("cine", "film-slate"),
+    ("serie", "television"),
+    ("tele", "television"),
+    ("libro", "book-open"),
+    ("libros", "books"),
+    ("juego", "game-controller"),
+    ("videojuego", "game-controller"),
+    ("arte", "palette"),
+    ("pintura", "paint-brush"),
+    ("dinero", "money"),
+    ("euro", "currency-eur"),
+    ("dolar", "currency-dollar"),
+    ("bitcoin", "currency-btc"),
+    ("banco", "bank"),
+    ("precio", "tag"),
+    ("compra", "shopping-cart"),
+    ("tienda", "storefront"),
+    ("salud", "heartbeat"),
+    ("medicina", "pill"),
+    ("corazon", "heart"),
+    ("ciencia", "flask"),
+    ("espacio", "planet"),
+    ("cohete", "rocket"),
+    ("casa", "house"),
+    ("reloj", "clock"),
+    ("hora", "clock"),
+    ("calendario", "calendar"),
+    ("fecha", "calendar"),
+    ("persona", "user"),
+    ("gente", "users"),
+    ("estrella", "star"),
+    ("fuego", "fire"),
+    ("hoja", "leaf"),
+    ("planta", "plant"),
+    ("flor", "flower"),
+    ("arbol", "tree"),
+    ("perro", "dog"),
+    ("gato", "cat"),
+    ("idea", "lightbulb"),
+    ("consejo", "lightbulb"),
+    ("aviso", "warning"),
+    ("alerta", "warning"),
+    ("informacion", "info"),
+    ("pregunta", "question"),
+    ("codigo", "code"),
+    ("ordenador", "monitor"),
+    ("noticia", "newspaper"),
+    ("noticias", "newspaper"),
+    ("enlace", "link"),
+    ("web", "globe"),
+    ("mundo", "globe"),
+    ("☀️", "sun"),
+    ("☀", "sun"),
+    ("🌤️", "cloud-sun"),
+    ("⛅", "cloud-sun"),
+    ("☁️", "cloud"),
+    ("🌧️", "cloud-rain"),
+    ("⛈️", "cloud-lightning"),
+    ("❄️", "snowflake"),
+    ("🌡️", "thermometer"),
+    ("🍳", "cooking-pot"),
+    ("🍽️", "fork-knife"),
+    ("☕", "coffee"),
+    ("⚽", "soccer-ball"),
+    ("🏀", "basketball"),
+    ("🏆", "trophy"),
+    ("🎬", "film-slate"),
+    ("🎮", "game-controller"),
+    ("🎵", "music-notes"),
+    ("📚", "books"),
+    ("💡", "lightbulb"),
+    ("⚠️", "warning"),
+    ("💰", "money"),
+    ("✈️", "airplane"),
+    ("🚗", "car"),
 ];
 
 /// Lo que se le enseña al modelo de la herramienta `mostrar`.
@@ -126,23 +410,27 @@ pub fn description() -> String {
         "Enseña la respuesta como una tarjeta en la isla de Veyl, hecha a la medida de lo preguntado: es lo que el usuario ve, así que hazla \
          rica y visual, como una ficha de un buscador o de un asistente con interfaz, y elige las piezas que mejor cuenten esta respuesta \
          (una gráfica para una evolución, una tabla para comparar, pros y contras para decidir, una tira para una previsión…). Llámala una \
-         vez, al final, y después contesta con tu frase corta (la que se dice en voz alta).\n\
+         vez, al final y con todo (también los enlaces y las preguntas), y después contesta con tu frase corta (la que se dice en voz alta).\n\
+         Los iconos son nombres en inglés de la lista del final, tal cual: nada de emoji ni de nombres en español.\n\
          Arriba: `titulo` (corto), `subtitulo`, `icono` e `imagen` (URL https directa de una imagen que hayas visto: portada, cartel, foto del \
          producto o del lugar; si no tienes, déjala vacía y Veyl saca la del primer enlace).\n\
+         `estilo` ({}): «portada» pone la imagen a sangre y el título grande debajo (para películas, juegos, lugares, personas, \
+         productos), «titular» un título grande sin imagen (noticias, definiciones, un dato), «ficha» lo normal.\n\
          Los colores son los del tema del usuario: no los elijas tú. Solo puedes marcar cosas pequeñas con un `color` que signifique algo: {}.\n\
          Piezas (`bloques`, en orden, como mucho 8), cada una con su `tipo`:\n\
          - texto: `texto` (un párrafo corto).\n\
          - lista: `items` [{{titulo, detalle?, valor?, icono?, color?, imagen?}}] (como mucho 8).\n\
          - datos: `items` [{{titulo, valor}}] (pares nombre–valor, en dos columnas).\n\
          - cifra: `valor` (lo grande: «18 °C», «2 h 10 min»), `texto` (qué es) e `icono?`.\n\
-         - metricas: `items` [{{titulo, valor, detalle?, icono?, color?}}] (2 a 6 cifras en mosaico; `detalle` p. ej. «+3 % hoy»).\n\
+         - metricas: `items` [{{titulo, valor, detalle?, icono?, color?, serie?}}] (2 a 6 cifras en mosaico; `detalle` p. ej. «+3 % hoy»; \
+         `serie`, números en orden, dibuja su minigráfica).\n\
          - cuenta: `fecha` (ISO 8601, «2026-12-25T00:00:00+01:00») y `texto`: cuenta atrás (o «hace…») que Veyl mantiene al día.\n\
          - grafica: `forma` (barras, lineas o anillo), `texto?` (qué muestra), `unidad?` («€», «°C», «h») e `items` [{{titulo, numero}}] \
          (hasta 12 puntos, en orden; `numero` es un número).\n\
          - tabla: `columnas` [cabeceras, la primera la de las filas] y `items` [{{titulo, valores: [texto por columna], mejor?}}] para \
          comparar (como mucho 4 columnas y 8 filas; `mejor` es el índice del valor que gana en esa fila).\n\
          - pros: `pros` [textos] y `contras` [textos].\n\
-         - tira: `items` [{{titulo, valor, icono?, detalle?}}]: fichas en fila (previsión por horas o días, horarios, tallas…).\n\
+         - tira: `items` [{{titulo, valor, icono?, detalle?}}]: fichas en fila (horarios, tallas, fases, turnos…; el tiempo va en `prevision`).\n\
          - pasos: `items` [{{titulo, detalle?}}]: pasos numerados.\n\
          - cronologia: `items` [{{valor (la fecha), titulo, detalle?}}]: una línea de tiempo.\n\
          - valoracion: `valor` (de 0 a 5, admite medios), `texto?` (de dónde: «IMDb 8,1», «Metacritic 88»).\n\
@@ -154,7 +442,27 @@ pub fn description() -> String {
          - barra: `valor` (de 0 a 1) y `texto` (qué mide).\n\
          - acciones: `items` [{{titulo, orden}}]: botones; `orden` es una orden de Veyl en español («abre Firefox», «pon un temporizador de 10 minutos»).\n\
          - enlaces: `items` [{{titulo, url}}] (solo http/https).\n\
+         - preguntas: `items` [{{titulo}}]: 2 o 3 preguntas cortas que el usuario probablemente quiera hacerte después, como las diría él \
+         («¿Y en PC?», «¿Cuánto cuesta?»), y que tú sepas contestar; al pulsar una, te llega con esta conversación.\n\
+         - prevision: el tiempo. `valor` (la temperatura de ahora, «12°»), `texto?` (cómo está: «Nublado, sensación de 10°»), `icono?` e \
+         `items` [{{titulo (día u hora), icono, min, max (números), detalle? (lluvia: «60 %»)}}], 2 a 10.\n\
+         - marcador: un resultado. `texto` (estado: «Final», «En juego · 67'») e `items` [{{titulo (equipo o jugador), valor (su \
+         marcador), imagen? (escudo), detalle?}}], exactamente 2.\n\
+         - versus: dos frente a frente. `columnas` [nombre A, nombre B], `imagenes?` [foto A, foto B] e `items` [{{titulo (qué se \
+         compara), valores: [A, B], mejor? (0 o 1)}}]; con una cifra en cada valor («8 GB», «959 €») se dibujan barras enfrentadas.\n\
+         - medidor: anillos de progreso. `items` [{{titulo, numero, maximo? (de fábrica, 100), valor? (lo que se lee dentro: «8,1»), \
+         color?}}], 1 a 4 (batería, calidad del aire, una nota sobre 10, humedad).\n\
+         - progreso: barras horizontales con nombre. `items` [{{titulo, numero, maximo?, valor? (lo que se lee: «120 g»), color?}}] \
+         (macros, presupuesto, reparto), hasta 8.\n\
+         - checklist: casillas que se marcan. `items` [{{titulo, valor? (cantidad: «200 g»), detalle?}}] (ingredientes, qué llevar), \
+         hasta 12.\n\
+         - definicion: `texto` (el término, la palabra misma), `valor?` (categoría o pronunciación: «sustantivo femenino») e `items` \
+         [{{titulo (un significado), detalle? (un ejemplo de uso)}}], hasta 4.\n\
+         - aviso: solo si hay algo que de verdad no debe pasarse por alto (un riesgo, un plazo, una advertencia); no en todas las \
+         tarjetas. `valor?` (título corto), `texto`, `icono?` y `color?` (bien, aviso, mal).\n\
+         - paleta: colores. `items` [{{titulo?, valor: «#RRGGBB»}}], 2 a 8.\n\
          Iconos que existen: {}.",
+        STYLES.join(", "),
         COLORS.join(", "),
         ICONS.join(", ")
     )
@@ -174,7 +482,11 @@ pub fn schema() -> Value {
             "orden": { "type": "string" },
             "url": { "type": "string" },
             "color": { "type": "string", "enum": COLORS },
-            "imagen": { "type": "string" }
+            "imagen": { "type": "string" },
+            "min": { "type": "number" },
+            "max": { "type": "number" },
+            "maximo": { "type": "number" },
+            "serie": { "type": "array", "items": { "type": "number" } }
         }
     });
     json!({
@@ -184,6 +496,7 @@ pub fn schema() -> Value {
             "subtitulo": { "type": "string" },
             "icono": { "type": "string" },
             "imagen": { "type": "string" },
+            "estilo": { "type": "string", "enum": STYLES },
             "bloques": {
                 "type": "array",
                 "items": {
@@ -198,6 +511,7 @@ pub fn schema() -> Value {
                         "unidad": { "type": "string" },
                         "valor": { "type": ["string", "number"] },
                         "columnas": { "type": "array", "items": { "type": "string" } },
+                        "imagenes": { "type": "array", "items": { "type": "string" } },
                         "pros": { "type": "array", "items": { "type": "string" } },
                         "contras": { "type": "array", "items": { "type": "string" } },
                         "items": { "type": "array", "items": item }
@@ -233,6 +547,16 @@ pub const KINDS: &[&str] = &[
     "barra",
     "acciones",
     "enlaces",
+    "preguntas",
+    "prevision",
+    "marcador",
+    "versus",
+    "medidor",
+    "progreso",
+    "checklist",
+    "definicion",
+    "aviso",
+    "paleta",
 ];
 
 fn cut(value: Option<&Value>, max: usize) -> String {
@@ -245,12 +569,121 @@ fn cut(value: Option<&Value>, max: usize) -> String {
     if text.chars().count() > max { format!("{}…", text.chars().take(max - 1).collect::<String>().trim_end()) } else { text }
 }
 
+/// Un texto en una línea y, si es largo, cortado con «…».
+pub fn clip(text: &str, max: usize) -> String {
+    cut(Some(&json!(text)), max)
+}
+
+/// Un icono que existe: el nombre tal cual o, si el modelo lo ha escrito a su
+/// manera («Nube lluvia», «cloud-rain-fill», «ph-sun», «☀️»), el que quería.
 fn icon(value: Option<&Value>) -> String {
-    value.and_then(Value::as_str).map(str::trim).filter(|i| ICONS.contains(i)).unwrap_or("").to_string()
+    let raw = value.and_then(Value::as_str).unwrap_or("").trim();
+    if ICONS.contains(&raw) {
+        return raw.to_string();
+    }
+    let folded: String = raw
+        .to_lowercase()
+        .chars()
+        .map(|c| match c {
+            'á' | 'à' => 'a',
+            'é' | 'è' => 'e',
+            'í' => 'i',
+            'ó' | 'ò' => 'o',
+            'ú' | 'ü' => 'u',
+            'ñ' => 'n',
+            ' ' | '_' => '-',
+            c => c,
+        })
+        .collect();
+    let name = folded.strip_prefix("ph-").unwrap_or(&folded);
+    let name = ["-fill", "-bold", "-light", "-thin", "-duotone", "-regular"].iter().fold(name, |n, end| n.strip_suffix(end).unwrap_or(n));
+    if let Some(found) = ICONS.iter().find(|i| **i == name) {
+        return found.to_string();
+    }
+    ALIASES.iter().find(|(alias, _)| *alias == name || *alias == raw).map(|(_, icon)| icon.to_string()).unwrap_or_default()
+}
+
+/// Una máxima y una mínima escritas juntas: «8° / 18°», «-2 / 5 ºC», «12–20°».
+fn temperatures(text: &str) -> Option<(f64, f64)> {
+    if !text.contains(['°', 'º']) {
+        return None;
+    }
+    let (a, b) = text.split_once('/').or_else(|| text.split_once('–')).or_else(|| text.split_once(" - "))?;
+    let (a, b) = (first_number(a)?, first_number(b)?);
+    Some((a.min(b), a.max(b)))
+}
+
+/// El primer porcentaje de un texto: «Chubascos, lluvia 90 %» → «90 %».
+fn percent(text: &str) -> String {
+    let Some(at) = text.find('%') else { return String::new() };
+    let digits: String = text[..at].trim_end().chars().rev().take_while(|c| c.is_ascii_digit()).collect();
+    if digits.is_empty() { String::new() } else { format!("{} %", digits.chars().rev().collect::<String>()) }
+}
+
+/// Una `tira` que en realidad es el tiempo (cada ficha, una mínima y una
+/// máxima) se pinta como `prevision`.
+fn as_forecast(block: &Value) -> Option<Value> {
+    let items = block.get("items")?.as_array()?;
+    let days: Vec<Value> = items
+        .iter()
+        .map(|i| {
+            let (low, high) = temperatures(i.get("valor")?.as_str()?)?;
+            Some(json!({ "titulo": i.get("titulo"), "icono": i.get("icono"), "min": low, "max": high, "detalle": percent(i.get("detalle").and_then(Value::as_str).unwrap_or("")) }))
+        })
+        .collect::<Option<_>>()?;
+    (days.len() >= 2).then(|| json!({ "tipo": "prevision", "items": days }))
+}
+
+/// Las piezas que van al pie de una tarjeta.
+const TAIL: &[&str] = &["enlaces", "acciones", "preguntas"];
+
+/// Si el modelo manda otra tarjeta solo con lo del pie (las preguntas que se
+/// le olvidaron, los enlaces), se le añade a la que ya había en vez de taparla.
+pub fn merge(old: &Value, new: &Value) -> Option<Value> {
+    let blocks = new["bloques"].as_array()?;
+    if blocks.is_empty() || !blocks.iter().all(|b| b["tipo"].as_str().is_some_and(|k| TAIL.contains(&k))) {
+        return None;
+    }
+    let mut merged = old.clone();
+    let kinds: Vec<&Value> = blocks.iter().map(|b| &b["tipo"]).collect();
+    let mut all: Vec<Value> = old["bloques"].as_array()?.iter().filter(|b| !kinds.contains(&&b["tipo"])).cloned().collect();
+    all.extend(blocks.iter().cloned());
+    merged["bloques"] = json!(all);
+    Some(merged)
 }
 
 fn color(value: Option<&Value>) -> String {
     value.and_then(Value::as_str).map(str::trim).filter(|c| COLORS.contains(c)).unwrap_or("").to_string()
+}
+
+/// Uno de los de una lista cerrada (un estilo), o vacío.
+fn one_of(value: Option<&Value>, list: &[&str]) -> String {
+    value.and_then(Value::as_str).map(|v| v.trim().to_lowercase().replace('á', "a")).filter(|v| list.contains(&v.as_str())).unwrap_or_default()
+}
+
+/// La primera cifra de un texto: «12 GB / 256 GB» → 12; «1.234,5 €» → 1234.5.
+fn first_number(text: &str) -> Option<f64> {
+    let start = text.find(|c: char| c.is_ascii_digit())?;
+    let negative = text[..start].trim_end().ends_with('-');
+    let run: String = text[start..].chars().take_while(|c| c.is_ascii_digit() || matches!(c, '.' | ',')).collect();
+    let run = run.trim_end_matches(['.', ',']);
+    number(Some(&json!(run))).map(|n| if negative { -n } else { n })
+}
+
+/// «#0af» o «#00AAFF» → «#00AAFF»; lo demás, vacío.
+fn hex(value: Option<&Value>) -> String {
+    let text = value.and_then(Value::as_str).unwrap_or("").trim().trim_start_matches('#');
+    let full = match text.len() {
+        3 => text.chars().flat_map(|c| [c, c]).collect(),
+        6 => text.to_string(),
+        _ => return String::new(),
+    };
+    if full.chars().all(|c| c.is_ascii_hexdigit()) { format!("#{}", full.to_uppercase()) } else { String::new() }
+}
+
+/// Los números de una lista, en orden (los que no lo son, fuera).
+fn numbers(value: Option<&Value>, most: usize) -> Vec<f64> {
+    value.and_then(Value::as_array).into_iter().flatten().filter_map(|v| number(Some(v))).take(most).collect()
 }
 
 fn web(value: Option<&Value>) -> String {
@@ -285,6 +718,8 @@ pub fn clean(input: &Value) -> Option<Value> {
     let title = cut(input.get("titulo"), 60);
     let mut blocks = Vec::new();
     for block in input.get("bloques").and_then(Value::as_array).into_iter().flatten().take(8) {
+        let forecast = (block.get("tipo").and_then(Value::as_str) == Some("tira")).then(|| as_forecast(block)).flatten();
+        let block = forecast.as_ref().unwrap_or(block);
         let kind = block.get("tipo").and_then(Value::as_str).unwrap_or("");
         let items = || block.get("items").and_then(Value::as_array).cloned().unwrap_or_default();
         let some = |list: Vec<Value>, least: usize, piece: Value| (list.len() >= least).then_some(piece);
@@ -302,14 +737,19 @@ pub fn clean(input: &Value) -> Option<Value> {
                     .iter()
                     .take(most)
                     .map(|i| {
-                        json!({
+                        let mut row = json!({
                             "titulo": cut(i.get("titulo"), 90),
                             "detalle": cut(i.get("detalle"), 160),
                             "valor": cut(i.get("valor"), if kind == "datos" { 60 } else { 30 }),
                             "icono": icon(i.get("icono")),
                             "color": color(i.get("color")),
                             "imagen": web(i.get("imagen"))
-                        })
+                        });
+                        let serie = numbers(i.get("serie"), 24);
+                        if kind == "metricas" && serie.len() >= 2 {
+                            row["serie"] = json!(serie);
+                        }
+                        row
                     })
                     .filter(|i| i["titulo"] != "" && (!matches!(kind, "datos" | "metricas" | "tira") || i["valor"] != ""))
                     .collect();
@@ -415,6 +855,122 @@ pub fn clean(input: &Value) -> Option<Value> {
                     .collect();
                 some(buttons.clone(), 1, json!({ "tipo": "acciones", "items": buttons }))
             }
+            "preguntas" => {
+                // Una pregunta puede llegar como texto suelto en vez de {titulo}.
+                let asks: Vec<Value> =
+                    items().iter().take(3).map(|i| json!({ "titulo": cut(i.get("titulo").or(Some(i)), 80) })).filter(|i| i["titulo"] != "").collect();
+                some(asks.clone(), 1, json!({ "tipo": "preguntas", "items": asks }))
+            }
+            "prevision" => {
+                let days: Vec<Value> = items()
+                    .iter()
+                    .take(10)
+                    .filter_map(|i| {
+                        let (low, high) = (number(i.get("min"))?, number(i.get("max"))?);
+                        let (low, high) = if low <= high { (low, high) } else { (high, low) };
+                        let title = cut(i.get("titulo"), 14);
+                        (!title.is_empty())
+                            .then(|| json!({ "titulo": title, "icono": icon(i.get("icono")), "min": low, "max": high, "detalle": cut(i.get("detalle"), 12) }))
+                    })
+                    .collect();
+                some(
+                    days.clone(),
+                    2,
+                    json!({ "tipo": "prevision", "valor": cut(block.get("valor"), 12), "texto": cut(block.get("texto"), 80), "icono": icon(block.get("icono")), "unidad": cut(block.get("unidad"), 4), "items": days }),
+                )
+            }
+            "marcador" => {
+                let sides: Vec<Value> = items()
+                    .iter()
+                    .take(2)
+                    .map(|i| json!({ "titulo": cut(i.get("titulo"), 28), "valor": cut(i.get("valor"), 8), "imagen": web(i.get("imagen")), "detalle": cut(i.get("detalle"), 40) }))
+                    .filter(|s| s["titulo"] != "")
+                    .collect();
+                (sides.len() == 2).then(|| json!({ "tipo": "marcador", "texto": cut(block.get("texto"), 40), "items": sides }))
+            }
+            "versus" => {
+                // Como en una tabla, la primera cabecera puede venir vacía.
+                let names: Vec<String> =
+                    block.get("columnas").and_then(Value::as_array).into_iter().flatten().map(|v| cut(Some(v), 28)).filter(|n| !n.is_empty()).take(2).collect();
+                let mut pictures: Vec<String> = block.get("imagenes").and_then(Value::as_array).into_iter().flatten().take(2).map(|v| web(Some(v))).collect();
+                pictures.resize(2, String::new());
+                let rows: Vec<Value> = items()
+                    .iter()
+                    .take(8)
+                    .filter_map(|i| {
+                        let values = texts(i.get("valores"), 2, 30);
+                        let title = cut(i.get("titulo"), 40);
+                        if values.len() < 2 || title.is_empty() {
+                            return None;
+                        }
+                        let figures: Vec<f64> = values.iter().filter_map(|v| first_number(v)).collect();
+                        let best = i.get("mejor").and_then(Value::as_i64).filter(|b| (0..2).contains(b)).unwrap_or(-1);
+                        Some(json!({ "titulo": title, "valores": values, "numeros": if figures.len() == 2 { figures } else { Vec::new() }, "mejor": best }))
+                    })
+                    .collect();
+                (names.len() == 2 && !rows.is_empty()).then(|| json!({ "tipo": "versus", "columnas": names, "imagenes": pictures, "items": rows }))
+            }
+            "medidor" | "progreso" => {
+                let rows: Vec<Value> = items()
+                    .iter()
+                    .take(if kind == "medidor" { 4 } else { 8 })
+                    .filter_map(|i| {
+                        let n = number(i.get("numero")).or_else(|| number(i.get("valor")))?;
+                        let most = number(i.get("maximo")).filter(|m| *m > 0.0).unwrap_or(if n > 1.0 { 100.0 } else { 1.0 });
+                        let title = cut(i.get("titulo"), 30);
+                        (!title.is_empty() || kind == "medidor").then(|| {
+                            json!({ "titulo": title, "numero": n.max(0.0), "maximo": most, "valor": cut(i.get("valor"), 14), "color": color(i.get("color")) })
+                        })
+                    })
+                    .collect();
+                some(rows.clone(), 1, json!({ "tipo": kind, "items": rows }))
+            }
+            "checklist" => {
+                let rows: Vec<Value> = items()
+                    .iter()
+                    .take(12)
+                    .map(|i| json!({ "titulo": cut(i.get("titulo").or(Some(i)), 90), "valor": cut(i.get("valor"), 24), "detalle": cut(i.get("detalle"), 120) }))
+                    .filter(|i| i["titulo"] != "")
+                    .collect();
+                some(rows.clone(), 1, json!({ "tipo": "checklist", "items": rows }))
+            }
+            "definicion" => {
+                let mut senses: Vec<Value> = items()
+                    .iter()
+                    .take(4)
+                    .map(|i| json!({ "titulo": cut(i.get("titulo").or(Some(i)), 220), "detalle": cut(i.get("detalle"), 160) }))
+                    .filter(|i| i["titulo"] != "")
+                    .collect();
+                // Sin acepciones, `texto` es el significado y el término, el título de la tarjeta.
+                let mut term = cut(block.get("texto"), 40);
+                if senses.is_empty() {
+                    let meaning = cut(block.get("texto"), 220);
+                    if !meaning.is_empty() {
+                        senses.push(json!({ "titulo": meaning, "detalle": "" }));
+                    }
+                    term = String::new();
+                }
+                if term.is_empty() {
+                    term = cut(input.get("titulo"), 40);
+                }
+                (!term.is_empty() && !senses.is_empty())
+                    .then(|| json!({ "tipo": "definicion", "texto": term, "valor": cut(block.get("valor"), 60), "items": senses }))
+            }
+            "aviso" => {
+                let text = cut(block.get("texto"), 300);
+                (!text.is_empty()).then(|| {
+                    json!({ "tipo": "aviso", "texto": text, "valor": cut(block.get("valor"), 50), "icono": icon(block.get("icono")), "color": color(block.get("color")) })
+                })
+            }
+            "paleta" => {
+                let swatches: Vec<Value> = items()
+                    .iter()
+                    .take(8)
+                    .map(|i| json!({ "titulo": cut(i.get("titulo"), 24), "valor": hex(i.get("valor").or(Some(i))) }))
+                    .filter(|i| i["valor"] != "")
+                    .collect();
+                some(swatches.clone(), 2, json!({ "tipo": "paleta", "items": swatches }))
+            }
             "enlaces" => {
                 let links: Vec<Value> = items()
                     .iter()
@@ -439,6 +995,7 @@ pub fn clean(input: &Value) -> Option<Value> {
         "subtitulo": cut(input.get("subtitulo"), 100),
         "icono": icon(input.get("icono")),
         "imagen": web(input.get("imagen")),
+        "estilo": one_of(input.get("estilo"), STYLES),
         "bloques": blocks
     }))
 }
@@ -616,12 +1173,14 @@ mod tests {
                 { "tipo": "lista", "items": [{ "titulo": "Mañana", "valor": "12 °C", "icono": "no-existe" }, { "detalle": "sin título" }] },
                 { "tipo": "enlaces", "items": [{ "titulo": "AEMET", "url": "https://aemet.es" }, { "titulo": "malo", "url": "file:///etc/passwd" }] },
                 { "tipo": "acciones", "items": [{ "titulo": "Paraguas", "orden": "apunta coger el paraguas mañana a las 8" }] },
+                { "tipo": "preguntas", "items": [{ "titulo": "¿Y pasado mañana?" }, "¿Llueve en Bilbao?", { "titulo": "" }, "a", "b"] },
                 { "tipo": "html", "texto": "<script>" }
             ]
         }))
         .unwrap();
         let blocks = card["bloques"].as_array().unwrap();
-        assert_eq!(blocks.iter().map(|b| b["tipo"].as_str().unwrap()).collect::<Vec<_>>(), ["cifra", "barra", "lista", "enlaces", "acciones"]);
+        assert_eq!(blocks.iter().map(|b| b["tipo"].as_str().unwrap()).collect::<Vec<_>>(), ["cifra", "barra", "lista", "enlaces", "acciones", "preguntas"]);
+        assert_eq!(blocks[5]["items"], json!([{ "titulo": "¿Y pasado mañana?" }, { "titulo": "¿Llueve en Bilbao?" }]));
         assert_eq!(blocks[0]["valor"], "18");
         assert_eq!(blocks[1]["valor"], 0.4);
         assert_eq!(blocks[2]["items"].as_array().unwrap().len(), 1);
@@ -654,6 +1213,125 @@ mod tests {
         assert_eq!(blocks[1]["items"][0]["valores"].as_array().unwrap().len(), 2);
         assert_eq!(blocks[1]["items"][0]["mejor"], 1);
         assert_eq!(blocks[3]["valor"], 4.0);
+    }
+
+    #[test]
+    fn art_direction_and_new_pieces() {
+        let card = clean(&json!({
+            "titulo": "Madrid", "tono": "cielo", "estilo": "Portada",
+            "bloques": [
+                { "tipo": "prevision", "valor": "12°", "icono": "cloud", "items": [
+                    { "titulo": "lun", "icono": "sun", "min": 15, "max": 7, "detalle": "10 %" },
+                    { "titulo": "mar", "min": "6", "max": "13 °C" },
+                    { "titulo": "mié", "min": 5 }
+                ] },
+                { "tipo": "marcador", "texto": "Final", "items": [{ "titulo": "Real Madrid", "valor": "2" }, { "titulo": "Barça", "valor": 1 }] },
+                { "tipo": "versus", "columnas": ["", "iPhone 17", "Pixel 10"], "imagenes": ["https://a/i.jpg"], "items": [
+                    { "titulo": "RAM", "valores": ["12 GB / 256 GB", "16 GB"], "mejor": 1 },
+                    { "titulo": "Sistema", "valores": ["iOS", "Android"], "mejor": 7 },
+                    { "titulo": "Solo uno", "valores": ["x"] }
+                ] },
+                { "tipo": "medidor", "items": [{ "titulo": "Batería", "numero": 72 }, { "titulo": "Nota", "numero": 8.1, "maximo": 10, "valor": "8,1" }, { "titulo": "x" }] },
+                { "tipo": "checklist", "items": [{ "titulo": "Harina", "valor": "200 g" }, "Huevos", { "valor": "sin nombre" }] },
+                { "tipo": "aviso", "valor": "Ojo", "texto": "Lleva paraguas", "color": "aviso", "icono": "umbrella" },
+                { "tipo": "paleta", "items": [{ "titulo": "Mar", "valor": "#0af" }, { "valor": "00AAFF" }, { "valor": "azul" }] },
+                { "tipo": "definicion", "texto": "serendipia", "valor": "sustantivo femenino", "items": [{ "titulo": "Hallazgo afortunado", "detalle": "Fue una serendipia." }] }
+            ]
+        }))
+        .unwrap();
+        assert_eq!(card["estilo"], "portada");
+        assert!(card.get("tono").is_none(), "el color es siempre el acento del tema");
+        let blocks = card["bloques"].as_array().unwrap();
+        let kinds: Vec<&str> = blocks.iter().map(|b| b["tipo"].as_str().unwrap()).collect();
+        assert_eq!(kinds, ["prevision", "marcador", "versus", "medidor", "checklist", "aviso", "paleta", "definicion"]);
+        // Una mínima mayor que la máxima se da la vuelta; el día sin máxima, fuera.
+        assert_eq!(blocks[0]["items"].as_array().unwrap().len(), 2);
+        assert_eq!((blocks[0]["items"][0]["min"].as_f64(), blocks[0]["items"][0]["max"].as_f64()), (Some(7.0), Some(15.0)));
+        assert_eq!(blocks[0]["items"][1]["max"], 13.0);
+        assert_eq!(blocks[1]["items"][1]["valor"], "1");
+        assert_eq!(blocks[2]["columnas"], json!(["iPhone 17", "Pixel 10"]));
+        assert_eq!(blocks[2]["imagenes"], json!(["https://a/i.jpg", ""]));
+        assert_eq!(blocks[2]["items"].as_array().unwrap().len(), 2);
+        assert_eq!(blocks[2]["items"][0]["numeros"], json!([12.0, 16.0]));
+        assert_eq!(blocks[2]["items"][1]["numeros"], json!([]));
+        assert_eq!(blocks[2]["items"][1]["mejor"], -1);
+        assert_eq!(blocks[3]["items"].as_array().unwrap().len(), 2);
+        assert_eq!(blocks[3]["items"][0]["maximo"], 100.0);
+        assert_eq!(blocks[3]["items"][1]["maximo"], 10.0);
+        assert_eq!(blocks[4]["items"].as_array().unwrap().len(), 2);
+        assert_eq!(blocks[6]["items"], json!([{ "titulo": "Mar", "valor": "#00AAFF" }, { "titulo": "", "valor": "#00AAFF" }]));
+        assert_eq!(blocks[7]["valor"], "sustantivo femenino");
+        // Con el significado en `texto` y sin acepciones, el término es el título.
+        let word = clean(&json!({ "titulo": "Serendipia", "bloques": [{ "tipo": "definicion", "texto": "Hallazgo afortunado." }] })).unwrap();
+        assert_eq!(word["bloques"][0]["texto"], "Serendipia");
+        assert_eq!(word["bloques"][0]["items"][0]["titulo"], "Hallazgo afortunado.");
+        // Un estilo que no existe se queda en el de fábrica.
+        assert_eq!(clean(&json!({ "titulo": "x", "estilo": "barroco", "bloques": [{ "tipo": "texto", "texto": "y" }] })).unwrap()["estilo"], "");
+        assert_eq!(first_number("-3,5 °C"), Some(-3.5));
+        assert_eq!(first_number("1.234,5 €"), Some(1234.5));
+        assert_eq!(first_number("n/a"), None);
+        let metric = clean(&json!({ "titulo": "BTC", "bloques": [{ "tipo": "metricas", "items": [
+            { "titulo": "Precio", "valor": "82 k€", "serie": [1, 2, "3", "x"] }, { "titulo": "Hoy", "valor": "+2 %", "serie": [1] }
+        ] }] }))
+        .unwrap();
+        assert_eq!(metric["bloques"][0]["items"][0]["serie"], json!([1.0, 2.0, 3.0]));
+        assert!(metric["bloques"][0]["items"][1].get("serie").is_none());
+    }
+
+    #[test]
+    fn what_the_model_writes_its_own_way() {
+        assert_eq!(icon(Some(&json!("Nube lluvia"))), "cloud-rain");
+        assert_eq!(icon(Some(&json!("tormenta"))), "cloud-lightning");
+        assert_eq!(icon(Some(&json!("ph-sun-fill"))), "sun");
+        assert_eq!(icon(Some(&json!("☀️"))), "sun");
+        assert_eq!(icon(Some(&json!("montaña"))), "mountains");
+        assert_eq!(icon(Some(&json!("🦄"))), "");
+        assert!(ICONS.iter().all(|i| ICONS.iter().filter(|j| *j == i).count() == 1), "sin repetidos");
+        assert!(ALIASES.iter().all(|(_, i)| ICONS.contains(i)), "cada alias lleva a un icono que existe");
+        // Una tira con mínimas y máximas es el tiempo.
+        let card = clean(&json!({ "titulo": "Bilbao", "bloques": [
+            { "tipo": "tira", "items": [
+                { "titulo": "Dom 22", "valor": "8° / 18°", "icono": "nube-lluvia", "detalle": "Chubascos, lluvia 90 %" },
+                { "titulo": "Lun 23", "valor": "-2º / 6º", "icono": "nieve", "detalle": "Despejado" }
+            ] },
+            { "tipo": "tira", "items": [{ "titulo": "Mañana", "valor": "9:00" }, { "titulo": "Tarde", "valor": "17:00" }] }
+        ] }))
+        .unwrap();
+        assert_eq!(card["bloques"][0]["tipo"], "prevision");
+        assert_eq!(card["bloques"][0]["items"][0], json!({ "titulo": "Dom 22", "icono": "cloud-rain", "min": 8.0, "max": 18.0, "detalle": "90 %" }));
+        assert_eq!((card["bloques"][0]["items"][1]["min"].as_f64(), card["bloques"][0]["items"][1]["detalle"].as_str()), (Some(-2.0), Some("")));
+        assert_eq!(card["bloques"][1]["tipo"], "tira");
+        // Una segunda tarjeta solo con preguntas se añade a la primera.
+        let first = clean(&json!({ "titulo": "Tortilla", "bloques": [{ "tipo": "pasos", "items": [{ "titulo": "Pela" }] }, { "tipo": "preguntas", "items": ["¿Con cebolla?"] }] })).unwrap();
+        let more = clean(&json!({ "titulo": "", "bloques": [{ "tipo": "preguntas", "items": ["¿Y sin huevo?"] }, { "tipo": "enlaces", "items": [{ "url": "https://a.es" }] }] })).unwrap();
+        let merged = merge(&first, &more).unwrap();
+        let kinds: Vec<&str> = merged["bloques"].as_array().unwrap().iter().map(|b| b["tipo"].as_str().unwrap()).collect();
+        assert_eq!(kinds, ["pasos", "preguntas", "enlaces"]);
+        assert_eq!(merged["bloques"][1]["items"][0]["titulo"], "¿Y sin huevo?");
+        assert_eq!(merged["titulo"], "Tortilla");
+        assert!(merge(&first, &first).is_none());
+    }
+
+    /// La galería de ejemplos (`data/cards.json`, `veyl cards`): cada tarjeta
+    /// tiene que ser una que veyld dejaría tal cual, con todo lo que Veyl lee.
+    /// Tras editarla, `GALLERY_WRITE=1 cargo test the_gallery` la deja limpia.
+    #[test]
+    fn the_gallery_is_clean() {
+        let Ok(text) = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/../data/cards.json")) else {
+            return;
+        };
+        let mut examples: Vec<Value> = serde_json::from_str(&text).unwrap();
+        if std::env::var_os("GALLERY_WRITE").is_some() {
+            for e in &mut examples {
+                e["card"] = clean(&e["card"]).unwrap();
+            }
+            std::fs::write(concat!(env!("CARGO_MANIFEST_DIR"), "/../data/cards.json"), serde_json::to_string_pretty(&examples).unwrap() + "\n").unwrap();
+            return;
+        }
+        for e in &examples {
+            let card = &e["card"];
+            assert_eq!(clean(card).as_ref(), Some(card), "{}", card["titulo"]);
+        }
     }
 
     #[test]

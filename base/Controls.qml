@@ -146,7 +146,7 @@ Item {
     // Lo que viene: los próximos eventos, de hoy en adelante.
     readonly property var coming: Agenda.ahead.slice(0, 3)
     readonly property int working: Agents.rows.filter(row => row.phase === "working" || row.phase === "needs").length
-    readonly property var shortcuts: [["shot-area", "Zona"], ["shot-screen", "Pantalla"], ["picker", "Color"]].map(([id, name]) => ({ order: order(id), name })).filter(item => item.order)
+    readonly property var shortcuts: [["shot-area", "Recortar zona"], ["shot-screen", "Captura"], ["picker", "Color"]].map(([id, name]) => ({ order: order(id), name })).filter(item => item.order)
     readonly property var session: ["lock", "suspend", "logout", "reboot", "poweroff"].map(id => order(id)).filter(order => order)
 
     // El historial, por días: un título por día y sus consultas debajo.
@@ -1873,7 +1873,7 @@ Item {
                             visible: root.notes.length === 0
                             icon: "bell"
                             text: "Nada nuevo"
-                            hint: "Lo que llegue y no atiendas se queda aquí y en el cajón del borde derecho."
+                            hint: "Lo que llegue y no atiendas se queda aquí."
                         }
                     }
                 }

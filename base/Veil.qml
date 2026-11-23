@@ -177,22 +177,28 @@ Scope {
         }
     }
 
-    // Mientras el cerebro piensa la respuesta, una isla pequeña; luego, si la
-    // ha compuesto, la tarjeta con ella, que se va sola (salvo con el puntero
-    // encima). Ceden ante lo que llega, la entrada y los ajustes.
+    // Mientras el cerebro piensa la respuesta, una isla pequeña que cuenta lo
+    // que va haciendo (y se puede parar); luego, en cuanto la compone, la
+    // tarjeta con ella, que se va sola cuando el modelo ha acabado (salvo con
+    // el puntero encima). Ceden ante lo que llega, la entrada y los ajustes.
     PanelWindow {
         screen: root.modelData
         visible: thought.progress > 0
         anchors.top: true
-        implicitWidth: Math.max(Tokens.answer, answer.implicitWidth) + (Tokens.join + Tokens.gap) * 2
-        implicitHeight: Math.max(Tokens.island, answer.implicitHeight) + Tokens.gap * 2
+        // De tamaño fijo, como la pantalla: si la capa siguiera a la isla,
+        // Hyprland enseñaría un fotograma estirado en cada cambio y la isla
+        // daría saltos. El puntero solo lo recibe la isla.
+        implicitWidth: root.modelData.width
+        implicitHeight: root.modelData.height
         exclusionMode: ExclusionMode.Ignore
         color: "transparent"
         mask: Region {
-            item: Daemon.card ? thought : null
+            item: thought
         }
         WlrLayershell.layer: WlrLayer.Overlay
         WlrLayershell.namespace: "veyl-thinking"
+        // El teclado, al pulsar el campo de la tarjeta para seguir preguntando.
+        WlrLayershell.keyboardFocus: answer.typing ? WlrKeyboardFocus.Exclusive : Daemon.card ? WlrKeyboardFocus.OnDemand : WlrKeyboardFocus.None
 
         Notch {
             id: thought
@@ -206,6 +212,7 @@ Scope {
             // La isla mide todo lo que lleva, también lo oculto: lo que no se
             // ve no ocupa, para que lo que se ve quede centrado.
             Thinking {
+                id: musing
                 width: visible ? implicitWidth : 0
                 height: visible ? implicitHeight : 0
                 running: thought.progress > 0 && Daemon.card === null
@@ -221,15 +228,15 @@ Scope {
                 room: root.modelData.width - (Tokens.join + Tokens.gap) * 2 - 80
                 limit: root.modelData.height - Tokens.gap * 2 - 60
                 visible: Daemon.card !== null
-                onDone: Daemon.card = null
+                onDone: Daemon.close()
             }
         }
 
-        // La tarjeta se va sola: más rato cuanto más lleva.
+        // La tarjeta se va sola, cuando el modelo ha acabado: más rato cuanto más lleva.
         Timer {
-            running: Daemon.card !== null && !over.hovered
+            running: Daemon.card !== null && !Daemon.card.live && !Daemon.card.demo && !over.hovered && !answer.typing
             interval: 20000 + 4000 * (Daemon.card?.bloques?.length ?? 0)
-            onTriggered: Daemon.card = null
+            onTriggered: Daemon.close()
         }
     }
 
@@ -274,14 +281,28 @@ Scope {
 
             readonly property alias hovered: inside.hovered
 
+            // Al capturar desde aquí, se aparta de golpe y no vuelve hasta la próxima.
+            property bool tucked: false
+
             anchors.horizontalCenter: parent.horizontalCenter
+            opacity: tucked ? 0 : 1
             shown: root.controls
+            onShownChanged: if (shown) tucked = false
             settle: Tokens.summon
             stretch: Tokens.veil
             bounce: 0.2
 
             HoverHandler {
                 id: inside
+            }
+
+            Connections {
+                target: Shot
+
+                function onHidingChanged(): void {
+                    if (Shot.hiding)
+                        center.tucked = true;
+                }
             }
 
             Controls {

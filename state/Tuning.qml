@@ -4,6 +4,7 @@ import QtQuick
 import Quickshell
 import Quickshell.Hyprland
 import Quickshell.Io
+import Quickshell.Services.Mpris
 import Quickshell.Wayland
 import qs
 
@@ -97,13 +98,63 @@ Singleton {
         Settings.input = nest(Settings.input, key, value);
     }
 
+    // Si estás viendo algo, aunque no toques nada: lo que pide no bloquear
+    // por D-Bus (veyld, el «no te duermas» de los navegadores) o un
+    // reproductor que suena con su ventana en un nivel a la vista. Lo que lo
+    // pide por Wayland (mpv, un vídeo a pantalla completa) ya lo atiende el
+    // compositor: entonces ni siquiera se está inactivo.
+    readonly property bool watching: Daemon.awake.length > 0 || Mpris.players.values.some(player => player.isPlaying && root.onScreen(player))
+
+    // Las clases de las ventanas en los niveles que se ven, en minúsculas.
+    function onScreen(player: MprisPlayer): bool {
+        const names = [player.desktopEntry, player.identity].filter(name => name).map(name => name.toLowerCase());
+        if (!names.length)
+            return false;
+        for (const monitor of Hyprland.monitors.values) {
+            for (const toplevel of monitor.activeWorkspace?.toplevels.values ?? []) {
+                const ipc = toplevel.lastIpcObject ?? {};
+                const classes = [ipc.class, ipc.initialClass].filter(name => name).map(name => name.toLowerCase());
+                // «org.mozilla.firefox» y «firefox», «Mozilla Firefox» y «firefox».
+                if (classes.some(cls => names.some(name => name === cls || name.endsWith(`.${cls}`) || cls.endsWith(`.${name}`) || name.split(" ").includes(cls))))
+                    return true;
+            }
+        }
+        return false;
+    }
+
+    function idled(): void {
+        if (idle.isIdle && !root.watching && !Lock.locked)
+            Lock.lock();
+    }
+
     // Bloquear tras un rato sin tocar nada (Settings.lockAfter, en minutos).
-    // Lo que pide no dormirse (un vídeo a pantalla completa) lo aplaza.
     IdleMonitor {
+        id: idle
+
         enabled: Settings.lockAfter > 0
         timeout: Settings.lockAfter * 60
         respectInhibitors: true
-        onIsIdleChanged: if (isIdle && !Lock.locked) Lock.lock()
+        onIsIdleChanged: {
+            if (!isIdle)
+                later.stop();
+            root.idled();
+        }
+    }
+
+    // Cuando se acaba lo que se veía sin que hayas vuelto, el plazo entero
+    // otra vez antes de bloquear: no de golpe al terminar el vídeo.
+    onWatchingChanged: {
+        if (watching)
+            later.stop();
+        else if (idle.isIdle)
+            later.restart();
+    }
+
+    Timer {
+        id: later
+
+        interval: Math.max(1, Settings.lockAfter) * 60 * 1000
+        onTriggered: root.idled()
     }
 
     GlobalShortcut {

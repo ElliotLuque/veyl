@@ -16,8 +16,10 @@ Singleton {
 
     readonly property var phases: ["working", "needs", "idle"]
     // Filas: { agent, phase, window, provider, label, name, detail, model,
-    // tool, since, focus, source }. `window` es la dirección de la ventana de Hyprland
-    // donde vive el agente («0x…»), o "". `source`: detected o told.
+    // tool, since, focus, ask, source }. `window` es la dirección de la ventana de Hyprland
+    // donde vive el agente («0x…»), o "". `ask`: lo que te pregunta si te
+    // necesita ({ title, detail, question, options: [{ key, label }] }, en
+    // JSON), o "". `source`: detected o told.
     readonly property ListModel list: ListModel {}
     property int needing: 0
     // Lo mismo que `list`, en un array: lo que pueden seguir los enlaces.
@@ -40,7 +42,7 @@ Singleton {
     }
 
     function row(fields: var): var {
-        return Object.assign({ agent: "", phase: "idle", window: "", provider: "", label: "", name: "", detail: "", model: "", tool: "", since: Date.now(), focus: "[]", source: "told" }, fields);
+        return Object.assign({ agent: "", phase: "idle", window: "", provider: "", label: "", name: "", cwd: "", detail: "", model: "", tool: "", since: Date.now(), focus: "[]", ask: "", source: "told" }, fields);
     }
 
     function put(fields: var): void {
@@ -115,11 +117,13 @@ Singleton {
                 provider: agent.provider,
                 label: agent.label,
                 name: agent.name,
+                cwd: agent.cwd ?? "",
                 detail: called ? "te llama" : agent.detail,
                 model: agent.model ?? "",
                 tool: agent.tool ?? "",
                 since: agent.since,
                 focus: JSON.stringify(agent.focus ?? []),
+                ask: agent.ask ? JSON.stringify(agent.ask) : "",
                 source: "detected"
             });
         }
@@ -156,6 +160,115 @@ Singleton {
     // esquema); el de los que no tienen uno, el acento.
     function vendor(provider: string): color {
         return ({ anthropic: Tokens.anthropic, openai: Tokens.openai, google: Tokens.google, github: Tokens.github })[provider] ?? Tokens.accent;
+    }
+
+    // Contesta a lo que pregunta un agente con una de sus opciones: veyld
+    // manda su tecla a la terminal del agente.
+    function answer(agent: string, key: string): void {
+        Daemon.send({ agent_answer: { id: agent, key } });
+        answered(agent, key);
+    }
+
+    // Se ha contestado a un agente (desde su isla, con sus teclas o con un atajo).
+    signal answered(string agent, string key)
+
+    // El agente que pregunta ahora (el último que empezó, si hay varios), con
+    // lo que pregunta: { agent, ask }, o null.
+    function asking(): var {
+        let best = null;
+        for (let i = 0; i < list.count; i++) {
+            const row = list.get(i);
+            if (row.phase !== "needs" || !row.ask)
+                continue;
+            let ask = null;
+            try {
+                ask = JSON.parse(row.ask);
+            } catch (e) {
+                continue;
+            }
+            if ((ask?.options?.length ?? 0) > 0 && (!best || row.since > best.since))
+                best = { agent: row.agent, since: row.since, ask };
+        }
+        return best;
+    }
+
+    // Le contesta con una de sus opciones: por su tecla («1», «y») o por lo
+    // que es: accept (la primera), second (la segunda) o deny (la que dice
+    // que no, o la última). Devuelve por qué no, si no puede.
+    function reply(what: string): string {
+        const now = asking();
+        if (!now)
+            return "ningún agente pregunta nada";
+        const options = now.ask.options;
+        const no = options.find(o => /^(no|deny|reject|denegar|cancel)\b/i.test(o.label));
+        const option = what === "accept" ? options[0] : what === "second" ? options[1] : what === "deny" ? (no ?? options[options.length - 1]) : options.find(o => o.key.toLowerCase() === what.toLowerCase());
+        if (!option)
+            return `no tiene la opción «${what}» (${options.map(o => o.key).join(", ")})`;
+        answer(now.agent, option.key);
+        return "";
+    }
+
+    // Lleva al agente que pregunta.
+    function openAsking(): string {
+        const now = asking();
+        if (!now)
+            return "ningún agente pregunta nada";
+        focus(now.agent);
+        return "";
+    }
+
+    GlobalShortcut {
+        appid: "veyl"
+        name: "agent-accept"
+        description: "Al agente que pregunta: la primera opción (sí)"
+        onPressed: root.reply("accept")
+    }
+
+    GlobalShortcut {
+        appid: "veyl"
+        name: "agent-second"
+        description: "Al agente que pregunta: la segunda opción"
+        onPressed: root.reply("second")
+    }
+
+    GlobalShortcut {
+        appid: "veyl"
+        name: "agent-deny"
+        description: "Al agente que pregunta: la que dice que no (o la última)"
+        onPressed: root.reply("deny")
+    }
+
+    GlobalShortcut {
+        appid: "veyl"
+        name: "agent-open"
+        description: "Ir al agente que pregunta"
+        onPressed: root.openAsking()
+    }
+
+    // Dónde está: «nixdots · nivel 2» (su carpeta y el nivel de su ventana).
+    function place(cwd: string, window: string): string {
+        const toplevel = Hyprland.toplevels.values.find(t => `0x${t.address}` === window);
+        const level = toplevel?.workspace ? Contexts.label(toplevel.workspace) : "";
+        const folder = cwd.replace(/\/+$/, "").split("/").pop();
+        return [folder, level === "" ? "" : /^\d+$/.test(level) ? `nivel ${level}` : level].filter(t => t).join(" · ");
+    }
+
+    // Cuánto lleva en lo que está: «42 s», «4:05», «1 h 05».
+    property real now: Date.now()
+    function elapsed(since: real): string {
+        const s = Math.max(0, Math.floor((now - since) / 1000));
+        const m = Math.floor(s / 60);
+        const two = n => (n < 10 ? "0" : "") + n;
+        return s < 60 ? `${s} s` : m < 60 ? `${m}:${two(s % 60)}` : `${Math.floor(m / 60)} h ${two(m % 60)}`;
+    }
+
+    // Cuatro veces por segundo (a una, el temporizador cae en la frontera del
+    // segundo y salta de dos en dos), y solo si alguno trabaja o te necesita.
+    Timer {
+        interval: 250
+        repeat: true
+        running: root.rows.some(r => r.phase === "working" || r.phase === "needs")
+        onTriggered: root.now = Date.now()
     }
 
     // Las fases de los agentes que viven en un espacio de trabajo.
@@ -250,6 +363,16 @@ Singleton {
 
         function focus(agent: string): void {
             root.focus(agent);
+        }
+
+        // Contesta al agente que pregunta: una tecla de sus opciones, o accept, second o deny.
+        function answer(what: string): string {
+            return root.reply(what);
+        }
+
+        // Lleva al agente que pregunta.
+        function open(): string {
+            return root.openAsking();
         }
 
         function list(): string {

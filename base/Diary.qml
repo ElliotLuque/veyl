@@ -1298,6 +1298,11 @@ PanelWindow {
                                         room: parent.width
                                         limit: 2000
                                         visible: !Recall.pending && !!Recall.answer?.card
+                                        // Lo que se pregunta después se contesta aquí mismo.
+                                        follow: text => {
+                                            Recall.query = text;
+                                            Recall.ask();
+                                        }
                                         onDone: Recall.forget()
                                     }
                                 }

@@ -34,6 +34,33 @@ Item {
     implicitWidth: column.width + inset * 2
     implicitHeight: column.height + inset * 2
 
+    // Con el ratón: el nivel bajo el puntero se marca y, pulsado, se va a él.
+    function at(y: real): int {
+        const index = Math.floor((y - inset) / row);
+        return index >= 0 && index < levels.length ? index : -1;
+    }
+
+    readonly property int pointed: hover.hovered ? at(hover.point.position.y) : -1
+
+    HoverHandler {
+        id: hover
+        cursorShape: root.pointed >= 0 && root.pointed !== root.current ? Qt.PointingHandCursor : Qt.ArrowCursor
+    }
+
+    TapHandler {
+        onTapped: point => Contexts.go(root.levels[root.at(point.position.y)])
+    }
+
+    Rectangle {
+        x: root.inset
+        y: root.inset + Math.max(0, root.pointed) * root.row
+        width: parent.width - root.inset * 2
+        height: root.row
+        radius: Tokens.round - root.inset
+        color: Qt.alpha(Tokens.text, 0.06)
+        visible: root.pointed >= 0 && root.pointed !== root.current
+    }
+
     // El nivel en el que estás
     Rectangle {
         x: root.inset

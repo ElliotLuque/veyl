@@ -29,18 +29,18 @@ ShellRoot {
         Veil {}
     }
 
-    // El cajón: las notificaciones guardadas, en el borde derecho.
-    Variants {
-        model: Quickshell.screens
-
-        Drawer {}
-    }
-
     // Volumen y brillo: al cambiar, en el borde derecho.
     Variants {
         model: Quickshell.screens
 
         Swell {}
+    }
+
+    // El destello al capturar la pantalla entera.
+    Variants {
+        model: Quickshell.screens
+
+        Flash {}
     }
 
     // La entrada: una sola, en el monitor desde el que se llama.

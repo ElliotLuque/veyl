@@ -27,10 +27,18 @@ Singleton {
     // { said, intent, title, glyph, confirm, ready }, o null.
     property string query: ""
     property var parsed: null
-    // Lo que el cerebro está pensando ahora: { said, since }, o null; y la
-    // tarjeta que ha compuesto como respuesta (veyld/src/card.rs), o null.
+    // Lo que el cerebro está pensando ahora, o null: { said, since, n } y, si
+    // es una pregunta al cerebro, si se puede parar (`stop`), lo que va
+    // haciendo (`steps`: { icono, texto, at })
+    // y las páginas que ha encontrado (`sources`: { titulo, host, url }). Y la
+    // tarjeta que ha compuesto como respuesta (veyld/src/card.rs), o null: llega
+    // en cuanto la compone, con `live` mientras el modelo acaba de escribir, y
+    // luego se completa (la frase, la portada) con el mismo `n`.
     property var thinking: null
     property var card: null
+    // La última tarjeta que se cerró, por su `n`: lo que le llegue después no
+    // la vuelve a sacar.
+    property var shut: null
     // Las vistas guardadas (veyld/src/views.rs): { name, members, apps, open, used };
     // `open` son las ventanas de su espacio, o null si no está abierta.
     property var views: []
@@ -42,6 +50,9 @@ Singleton {
     // Lo que queda de cuota en las suscripciones de los agentes
     // (veyld/src/usage.rs): { provider, name, at, windows: [{ label, used, resets }] }.
     property var usage: []
+    // Lo que pide que no se bloquee (veyld/src/awake.rs, el «no te duermas»
+    // de org.freedesktop.ScreenSaver): { app, reason }.
+    property var awake: []
     property int serial: 0
     // Si hay a quién preguntarle lo que la gramática no entiende (veyld, `thinks`).
     readonly property bool thinks: connected && (!!Settings.brain?.provider || Settings.llm !== "")
@@ -118,6 +129,18 @@ Singleton {
         send({ say: text, source, ask: true });
     }
 
+    // Deja de pensar lo que está pensando.
+    function stop(): void {
+        if (thinking?.n !== undefined)
+            send({ stop: thinking.n });
+    }
+
+    // Cierra la tarjeta que se ve.
+    function close(): void {
+        shut = card?.n ?? null;
+        card = null;
+    }
+
     // Algo con una vista, por su nombre tal cual (sin pasar por la gramática):
     // create (con `level`, solo lo de este nivel), open, again, undo, save o forget.
     function view(op: string, name: string, level: bool): void {
@@ -147,6 +170,8 @@ Singleton {
             asked = message.asked;
             journal = message.journal !== false;
         }
+        if (message.awake !== undefined)
+            awake = message.awake;
         if (message.usage !== undefined)
             usage = message.usage;
         if (message.asked_one !== undefined)
@@ -156,14 +181,18 @@ Singleton {
         if (message.calendar !== undefined)
             Agenda.told(message.calendar);
         if (message.thinking !== undefined) {
+            const was = thinking;
             thinking = message.thinking;
             // Una pregunta nueva recoge la tarjeta que hubiera: la isla vuelve
-            // a «Pensando» y luego se convierte en la respuesta nueva.
-            if (thinking)
+            // a «Pensando» y luego se convierte en la respuesta nueva. Lo que
+            // llega de la misma (cada paso que da) no la toca.
+            if (thinking && (thinking.n === undefined || (thinking.n !== was?.n && card?.n !== thinking.n)))
                 card = null;
         }
-        if (message.card !== undefined)
+        if (message.card !== undefined && (message.card?.n === undefined || message.card.n !== shut))
             card = message.card;
+        if (message.card_patch !== undefined && card && card.n === message.card_patch.n)
+            card = Object.assign({}, card, message.card_patch);
         if (message.voice)
             Listen.hear(message.voice);
         // Lo que pidió la vista del diario.
@@ -207,6 +236,9 @@ Singleton {
         case "agenda.add":
             Agenda.add(String(args[0]), String(args[1]), String(args[2] ?? ""));
             break;
+        case "shot.take":
+            Shot.take(String(args[0] ?? ""), !!args[1], Number(args[2]) || 0);
+            break;
         case "agent.focus":
             Agents.focus(String(args[0]));
             break;
@@ -244,9 +276,13 @@ Singleton {
         } else {
             Listen.level = 0;
             thinking = null;
+            // La que se estaba acabando de escribir ya no se acabará: que se vaya sola.
+            if (card?.live)
+                card = Object.assign({}, card, { live: false });
             parsed = null;
             agents([]);
             asked = [];
+            awake = [];
             Notifications.load([]);
         }
     }

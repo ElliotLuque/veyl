@@ -52,6 +52,24 @@ Singleton {
         return numbered.concat(views.sort((a, b) => b.id - a.id).map(workspace => ({ id: workspace.id, number: "", name: workspace.name, workspace, current: workspace.id === current })));
     }
 
+    // Ir a un nivel (uno de los de `levels`). Los numerados, por su id, que
+    // con hyprsplit ya es el del monitor; las vistas, por su nombre.
+    function go(level: var): void {
+        if (!level || level.current)
+            return;
+        const target = level.id > 0 ? String(level.id) : `name:${level.name}`;
+        Compositor.run(`hl.dispatch(hl.dsp.focus({ workspace = ${JSON.stringify(target)} }))`);
+    }
+
+    // Subir (-1) o bajar (1) un nivel en un monitor, sin dar la vuelta.
+    function step(monitor: HyprlandMonitor, way: int): void {
+        const all = levels(monitor);
+        const at = all.findIndex(level => level.current);
+        const next = all[Math.max(0, Math.min(all.length - 1, at + way))];
+        if (at >= 0)
+            go(next);
+    }
+
     // Pantalla completa de verdad; una ventana maximizada respeta los huecos.
     function fullscreen(monitor: HyprlandMonitor): bool {
         const workspace = monitor?.activeWorkspace;

@@ -65,7 +65,6 @@ Singleton {
     readonly property int almanac: 400  // ancho del almanaque, bajo la hora
     readonly property int controls: 620 // ancho del centro de control, arriba en el centro
     readonly property int tab: 8        // alto de la franja del borde de arriba que lo llama
-    readonly property int ledge: 260    // largo de la franja del borde derecho que abre el cajón
     readonly property int toggle: 56    // alto de un interruptor del centro de control
     readonly property int dials: 1080   // ancho de los ajustes, arriba en el centro: la isla más grande
     readonly property int dialsTall: 700 // su alto, como mucho

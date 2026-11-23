@@ -1,0 +1,1325 @@
+[
+  {
+    "card": {
+      "bloques": [
+        {
+          "icono": "cloud-sun",
+          "items": [
+            {
+              "detalle": "",
+              "icono": "cloud-sun",
+              "max": 14.0,
+              "min": 6.0,
+              "titulo": "Hoy"
+            },
+            {
+              "detalle": "80 %",
+              "icono": "cloud-rain",
+              "max": 12.0,
+              "min": 7.0,
+              "titulo": "Lun"
+            },
+            {
+              "detalle": "60 %",
+              "icono": "cloud-rain",
+              "max": 11.0,
+              "min": 5.0,
+              "titulo": "Mar"
+            },
+            {
+              "detalle": "",
+              "icono": "sun",
+              "max": 15.0,
+              "min": 3.0,
+              "titulo": "Mié"
+            },
+            {
+              "detalle": "",
+              "icono": "sun",
+              "max": 18.0,
+              "min": 4.0,
+              "titulo": "Jue"
+            },
+            {
+              "detalle": "40 %",
+              "icono": "cloud-snow",
+              "max": 6.0,
+              "min": -2.0,
+              "titulo": "Vie"
+            }
+          ],
+          "texto": "Intervalos nubosos, sensación de 10°",
+          "tipo": "prevision",
+          "unidad": "",
+          "valor": "12°"
+        },
+        {
+          "items": [
+            {
+              "titulo": "AEMET · Madrid",
+              "url": "https://www.aemet.es"
+            },
+            {
+              "titulo": "Meteored",
+              "url": "https://www.meteored.com"
+            }
+          ],
+          "tipo": "enlaces"
+        },
+        {
+          "items": [
+            {
+              "titulo": "¿Necesito paraguas mañana?"
+            },
+            {
+              "titulo": "¿Y en Valencia?"
+            }
+          ],
+          "tipo": "preguntas"
+        }
+      ],
+      "estilo": "ficha",
+      "icono": "cloud-sun",
+      "imagen": "",
+      "subtitulo": "Esta semana",
+      "titulo": "El tiempo en Madrid"
+    },
+    "fuentes": [
+      "aemet.es",
+      "eltiempo.es",
+      "meteored.com"
+    ],
+    "pasos": [
+      {
+        "icono": "magnifying-glass",
+        "texto": "Busca «previsión Madrid semana AEMET»"
+      },
+      {
+        "icono": "globe",
+        "texto": "Lee aemet.es"
+      },
+      {
+        "icono": "sparkle",
+        "texto": "Compone la respuesta"
+      }
+    ],
+    "said": "¿Qué tiempo hará en Madrid esta semana?"
+  },
+  {
+    "card": {
+      "bloques": [
+        {
+          "items": [
+            {
+              "detalle": "Griezmann 12', 70' · Álvarez 55'",
+              "imagen": "",
+              "titulo": "Atlético de Madrid",
+              "valor": "3"
+            },
+            {
+              "detalle": "Isaac 38'",
+              "imagen": "",
+              "titulo": "Sevilla",
+              "valor": "1"
+            }
+          ],
+          "texto": "Final",
+          "tipo": "marcador"
+        },
+        {
+          "items": [
+            {
+              "color": "",
+              "detalle": "De cabeza tras un córner",
+              "icono": "",
+              "imagen": "",
+              "titulo": "Gol de Griezmann",
+              "valor": "12'"
+            },
+            {
+              "color": "",
+              "detalle": "",
+              "icono": "",
+              "imagen": "",
+              "titulo": "Empata el Sevilla",
+              "valor": "38'"
+            },
+            {
+              "color": "",
+              "detalle": "",
+              "icono": "",
+              "imagen": "",
+              "titulo": "Álvarez pone el 2-1",
+              "valor": "55'"
+            },
+            {
+              "color": "",
+              "detalle": "",
+              "icono": "",
+              "imagen": "",
+              "titulo": "Griezmann sentencia",
+              "valor": "70'"
+            }
+          ],
+          "tipo": "cronologia"
+        },
+        {
+          "items": [
+            {
+              "titulo": "LaLiga · crónica",
+              "url": "https://www.laliga.com"
+            },
+            {
+              "titulo": "Marca",
+              "url": "https://www.marca.com"
+            }
+          ],
+          "tipo": "enlaces"
+        },
+        {
+          "items": [
+            {
+              "titulo": "¿Cómo va la clasificación?"
+            },
+            {
+              "titulo": "¿Cuándo es el próximo partido?"
+            }
+          ],
+          "tipo": "preguntas"
+        }
+      ],
+      "estilo": "ficha",
+      "icono": "soccer-ball",
+      "imagen": "",
+      "subtitulo": "Jornada 13 · Metropolitano",
+      "titulo": "Atlético 3 – 1 Sevilla"
+    },
+    "fuentes": [
+      "laliga.com",
+      "marca.com",
+      "as.com"
+    ],
+    "pasos": [
+      {
+        "icono": "magnifying-glass",
+        "texto": "Busca «Atlético resultado último partido»"
+      },
+      {
+        "icono": "globe",
+        "texto": "Lee laliga.com"
+      }
+    ],
+    "said": "¿Cómo quedó el último partido del Atlético?"
+  },
+  {
+    "card": {
+      "bloques": [
+        {
+          "columnas": [
+            "iPhone 17 Pro",
+            "Pixel 10 Pro"
+          ],
+          "imagenes": [
+            "",
+            ""
+          ],
+          "items": [
+            {
+              "mejor": 1,
+              "numeros": [
+                1.319,
+                1.099
+              ],
+              "titulo": "Precio",
+              "valores": [
+                "1.319 €",
+                "1.099 €"
+              ]
+            },
+            {
+              "mejor": -1,
+              "numeros": [
+                12.0,
+                16.0
+              ],
+              "titulo": "RAM",
+              "valores": [
+                "12 GB",
+                "16 GB"
+              ]
+            },
+            {
+              "mejor": -1,
+              "numeros": [
+                4.252,
+                4.87
+              ],
+              "titulo": "Batería",
+              "valores": [
+                "4.252 mAh",
+                "4.870 mAh"
+              ]
+            },
+            {
+              "mejor": -1,
+              "numeros": [
+                6.3,
+                6.3
+              ],
+              "titulo": "Pantalla",
+              "valores": [
+                "6,3\"",
+                "6,3\""
+              ]
+            },
+            {
+              "mejor": -1,
+              "numeros": [
+                6.0,
+                7.0
+              ],
+              "titulo": "Años de actualizaciones",
+              "valores": [
+                "6",
+                "7"
+              ]
+            }
+          ],
+          "tipo": "versus"
+        },
+        {
+          "contras": [
+            "iPhone: el más caro",
+            "Pixel: chip menos potente en juegos"
+          ],
+          "pros": [
+            "Pixel: más barato y más RAM",
+            "Pixel: 7 años de actualizaciones"
+          ],
+          "tipo": "pros"
+        },
+        {
+          "items": [
+            {
+              "titulo": "GSMArena · comparativa",
+              "url": "https://www.gsmarena.com"
+            },
+            {
+              "titulo": "Xataka",
+              "url": "https://www.xataka.com"
+            }
+          ],
+          "tipo": "enlaces"
+        },
+        {
+          "items": [
+            {
+              "orden": "abre store.google.com",
+              "titulo": "Abre la tienda de Google"
+            }
+          ],
+          "tipo": "acciones"
+        },
+        {
+          "items": [
+            {
+              "titulo": "¿Cuál tiene mejor cámara?"
+            },
+            {
+              "titulo": "¿Y el Galaxy S26?"
+            }
+          ],
+          "tipo": "preguntas"
+        }
+      ],
+      "estilo": "ficha",
+      "icono": "device-mobile",
+      "imagen": "",
+      "subtitulo": "Lo que importa al elegir",
+      "titulo": "iPhone 17 Pro frente a Pixel 10 Pro"
+    },
+    "fuentes": [
+      "gsmarena.com",
+      "xataka.com",
+      "apple.com",
+      "store.google.com"
+    ],
+    "pasos": [
+      {
+        "icono": "magnifying-glass",
+        "texto": "Busca «iPhone 17 Pro vs Pixel 10 Pro especificaciones»"
+      },
+      {
+        "icono": "globe",
+        "texto": "Lee gsmarena.com"
+      },
+      {
+        "icono": "brain",
+        "texto": "Piensa"
+      }
+    ],
+    "said": "Compara el iPhone 17 Pro con el Pixel 10 Pro"
+  },
+  {
+    "card": {
+      "bloques": [
+        {
+          "items": [
+            {
+              "color": "",
+              "maximo": 100.0,
+              "numero": 72.0,
+              "titulo": "Batería",
+              "valor": ""
+            },
+            {
+              "color": "",
+              "maximo": 16.0,
+              "numero": 11.2,
+              "titulo": "Memoria",
+              "valor": "11,2 GB"
+            },
+            {
+              "color": "aviso",
+              "maximo": 100.0,
+              "numero": 91.0,
+              "titulo": "Disco",
+              "valor": ""
+            }
+          ],
+          "tipo": "medidor"
+        },
+        {
+          "items": [
+            {
+              "color": "",
+              "maximo": 16.0,
+              "numero": 4.1,
+              "titulo": "Firefox",
+              "valor": "4,1 GB"
+            },
+            {
+              "color": "",
+              "maximo": 16.0,
+              "numero": 1.6,
+              "titulo": "kitty + nvim",
+              "valor": "1,6 GB"
+            },
+            {
+              "color": "",
+              "maximo": 16.0,
+              "numero": 0.9,
+              "titulo": "Discord",
+              "valor": "0,9 GB"
+            }
+          ],
+          "tipo": "progreso"
+        },
+        {
+          "color": "aviso",
+          "icono": "",
+          "texto": "Está al 91 %: libera espacio pronto o las actualizaciones fallarán.",
+          "tipo": "aviso",
+          "valor": "Disco casi lleno"
+        },
+        {
+          "items": [
+            {
+              "orden": "qué ocupa el disco",
+              "titulo": "¿Qué ocupa el disco?"
+            }
+          ],
+          "tipo": "acciones"
+        }
+      ],
+      "estilo": "titular",
+      "icono": "gauge",
+      "imagen": "",
+      "subtitulo": "Batería, memoria y disco",
+      "titulo": "Tu ordenador ahora"
+    },
+    "fuentes": [],
+    "pasos": [
+      {
+        "icono": "gauge",
+        "texto": "Mide el ordenador"
+      },
+      {
+        "icono": "gauge",
+        "texto": "Mide el disco"
+      }
+    ],
+    "said": "¿Cómo va el ordenador?"
+  },
+  {
+    "card": {
+      "bloques": [
+        {
+          "items": [
+            {
+              "detalle": "Fue una serendipia encontrar el piso justo ese día.",
+              "titulo": "Hallazgo valioso que se produce de manera accidental o casual."
+            },
+            {
+              "detalle": "",
+              "titulo": "Capacidad de hacer descubrimientos afortunados por azar."
+            }
+          ],
+          "texto": "serendipia",
+          "tipo": "definicion",
+          "valor": "sustantivo femenino"
+        },
+        {
+          "texto": "Descubrimientos hechos por accidente y sagacidad, de cosas que no se buscaban.",
+          "tipo": "cita",
+          "valor": "Horace Walpole, 1754"
+        },
+        {
+          "items": [
+            {
+              "titulo": "¿De dónde viene la palabra?"
+            },
+            {
+              "titulo": "¿Tiene sinónimos?"
+            }
+          ],
+          "tipo": "preguntas"
+        }
+      ],
+      "estilo": "titular",
+      "icono": "sparkle",
+      "imagen": "",
+      "subtitulo": "Del inglés serendipity",
+      "titulo": "Serendipia"
+    },
+    "fuentes": [],
+    "pasos": [],
+    "said": "¿Qué significa serendipia?"
+  },
+  {
+    "card": {
+      "bloques": [
+        {
+          "items": [
+            {
+              "color": "",
+              "detalle": "",
+              "icono": "clock",
+              "imagen": "",
+              "titulo": "Tiempo",
+              "valor": "45 min"
+            },
+            {
+              "color": "",
+              "detalle": "",
+              "icono": "users",
+              "imagen": "",
+              "titulo": "Raciones",
+              "valor": "4"
+            },
+            {
+              "color": "",
+              "detalle": "",
+              "icono": "chef-hat",
+              "imagen": "",
+              "titulo": "Dificultad",
+              "valor": "Fácil"
+            }
+          ],
+          "tipo": "metricas"
+        },
+        {
+          "items": [
+            {
+              "detalle": "",
+              "titulo": "Huevos",
+              "valor": "6"
+            },
+            {
+              "detalle": "",
+              "titulo": "Patatas",
+              "valor": "600 g"
+            },
+            {
+              "detalle": "Opcional, y sin discusiones",
+              "titulo": "Cebolla",
+              "valor": "1"
+            },
+            {
+              "detalle": "",
+              "titulo": "Aceite de oliva",
+              "valor": "200 ml"
+            },
+            {
+              "detalle": "",
+              "titulo": "Sal",
+              "valor": ""
+            }
+          ],
+          "tipo": "checklist"
+        },
+        {
+          "items": [
+            {
+              "color": "",
+              "detalle": "",
+              "icono": "",
+              "imagen": "",
+              "titulo": "Pela y corta las patatas en láminas finas",
+              "valor": ""
+            },
+            {
+              "color": "",
+              "detalle": "Tiernas, sin dorar",
+              "icono": "",
+              "imagen": "",
+              "titulo": "Fríelas a fuego medio-bajo 20 minutos",
+              "valor": ""
+            },
+            {
+              "color": "",
+              "detalle": "",
+              "icono": "",
+              "imagen": "",
+              "titulo": "Mézclalas con el huevo batido y deja reposar 5 minutos",
+              "valor": ""
+            },
+            {
+              "color": "",
+              "detalle": "",
+              "icono": "",
+              "imagen": "",
+              "titulo": "Cuaja en la sartén y dale la vuelta con un plato",
+              "valor": ""
+            }
+          ],
+          "tipo": "pasos"
+        },
+        {
+          "items": [
+            {
+              "orden": "pon un temporizador de 20 minutos",
+              "titulo": "Temporizador de 20 min"
+            }
+          ],
+          "tipo": "acciones"
+        },
+        {
+          "items": [
+            {
+              "titulo": "¿Cómo la dejo jugosa?"
+            },
+            {
+              "titulo": "¿Se puede hacer sin huevo?"
+            }
+          ],
+          "tipo": "preguntas"
+        }
+      ],
+      "estilo": "ficha",
+      "icono": "cooking-pot",
+      "imagen": "",
+      "subtitulo": "Para 4 personas",
+      "titulo": "Tortilla de patatas"
+    },
+    "fuentes": [],
+    "pasos": [
+      {
+        "icono": "sparkle",
+        "texto": "Compone la respuesta"
+      }
+    ],
+    "said": "Dame la receta de la tortilla de patatas"
+  },
+  {
+    "card": {
+      "bloques": [
+        {
+          "items": [
+            {
+              "titulo": "Espresso",
+              "valor": "#3B2418"
+            },
+            {
+              "titulo": "Caramelo",
+              "valor": "#C8814A"
+            },
+            {
+              "titulo": "Crema",
+              "valor": "#F4E7D3"
+            },
+            {
+              "titulo": "Hoja",
+              "valor": "#5E7A52"
+            },
+            {
+              "titulo": "Tinta",
+              "valor": "#1E1B19"
+            }
+          ],
+          "tipo": "paleta"
+        },
+        {
+          "texto": "Usa la crema de fondo, el espresso para el texto y el caramelo solo para botones y precios.",
+          "tipo": "texto"
+        },
+        {
+          "items": [
+            {
+              "color": "bien",
+              "icono": "check-circle",
+              "titulo": "Contraste AA"
+            },
+            {
+              "color": "",
+              "icono": "",
+              "titulo": "Cálida"
+            },
+            {
+              "color": "",
+              "icono": "",
+              "titulo": "Artesanal"
+            }
+          ],
+          "tipo": "etiquetas"
+        }
+      ],
+      "estilo": "ficha",
+      "icono": "palette",
+      "imagen": "",
+      "subtitulo": "Cálida, tostada y legible",
+      "titulo": "Paleta para una cafetería"
+    },
+    "fuentes": [],
+    "pasos": [
+      {
+        "icono": "sparkle",
+        "texto": "Compone la respuesta"
+      }
+    ],
+    "said": "Dame una paleta de colores para la web de una cafetería"
+  },
+  {
+    "card": {
+      "bloques": [
+        {
+          "texto": "IMDb 8,5",
+          "tipo": "valoracion",
+          "valor": 4.5
+        },
+        {
+          "items": [
+            {
+              "color": "",
+              "icono": "planet",
+              "titulo": "Ciencia ficción"
+            },
+            {
+              "color": "",
+              "icono": "clock",
+              "titulo": "166 min"
+            },
+            {
+              "color": "",
+              "icono": "television",
+              "titulo": "Max"
+            }
+          ],
+          "tipo": "etiquetas"
+        },
+        {
+          "texto": "Paul Atreides se une a los Fremen mientras busca venganza contra quienes destruyeron a su familia.",
+          "tipo": "texto"
+        },
+        {
+          "items": [
+            {
+              "color": "",
+              "detalle": "",
+              "icono": "",
+              "imagen": "",
+              "titulo": "Reparto",
+              "valor": "Timothée Chalamet, Zendaya"
+            },
+            {
+              "color": "",
+              "detalle": "",
+              "icono": "",
+              "imagen": "",
+              "titulo": "Música",
+              "valor": "Hans Zimmer"
+            },
+            {
+              "color": "",
+              "detalle": "",
+              "icono": "",
+              "imagen": "",
+              "titulo": "Taquilla",
+              "valor": "714 M$"
+            }
+          ],
+          "tipo": "datos"
+        },
+        {
+          "items": [
+            {
+              "titulo": "IMDb",
+              "url": "https://www.imdb.com"
+            },
+            {
+              "titulo": "Wikipedia",
+              "url": "https://es.wikipedia.org/wiki/Dune:_parte_dos"
+            }
+          ],
+          "tipo": "enlaces"
+        },
+        {
+          "items": [
+            {
+              "titulo": "¿Habrá una tercera parte?"
+            },
+            {
+              "titulo": "¿Dónde se rodó?"
+            }
+          ],
+          "tipo": "preguntas"
+        }
+      ],
+      "estilo": "portada",
+      "icono": "film-slate",
+      "imagen": "https://upload.wikimedia.org/wikipedia/en/5/52/Dune_Part_Two_poster.jpeg",
+      "subtitulo": "Denis Villeneuve · 2024",
+      "titulo": "Dune: Parte dos"
+    },
+    "fuentes": [
+      "imdb.com",
+      "wikipedia.org",
+      "filmaffinity.com"
+    ],
+    "pasos": [
+      {
+        "icono": "magnifying-glass",
+        "texto": "Busca «Dune Parte dos reparto crítica»"
+      },
+      {
+        "icono": "globe",
+        "texto": "Lee imdb.com"
+      }
+    ],
+    "said": "Háblame de Dune: Parte dos"
+  },
+  {
+    "card": {
+      "bloques": [
+        {
+          "items": [
+            {
+              "color": "bien",
+              "detalle": "+4,2 % en 7 días",
+              "icono": "",
+              "imagen": "",
+              "serie": [
+                79000.0,
+                78100.0,
+                80400.0,
+                81200.0,
+                80900.0,
+                81800.0,
+                82350.0
+              ],
+              "titulo": "Ahora",
+              "valor": "82.350 €"
+            },
+            {
+              "color": "",
+              "detalle": "el jueves",
+              "icono": "",
+              "imagen": "",
+              "titulo": "Máximo",
+              "valor": "83.100 €"
+            },
+            {
+              "color": "mal",
+              "detalle": "el martes",
+              "icono": "",
+              "imagen": "",
+              "titulo": "Mínimo",
+              "valor": "78.100 €"
+            }
+          ],
+          "tipo": "metricas"
+        },
+        {
+          "forma": "lineas",
+          "items": [
+            {
+              "numero": 79000.0,
+              "titulo": "lun"
+            },
+            {
+              "numero": 78100.0,
+              "titulo": "mar"
+            },
+            {
+              "numero": 80400.0,
+              "titulo": "mié"
+            },
+            {
+              "numero": 81200.0,
+              "titulo": "jue"
+            },
+            {
+              "numero": 80900.0,
+              "titulo": "vie"
+            },
+            {
+              "numero": 81800.0,
+              "titulo": "sáb"
+            },
+            {
+              "numero": 82350.0,
+              "titulo": "dom"
+            }
+          ],
+          "texto": "Cierre de cada día",
+          "tipo": "grafica",
+          "unidad": "€"
+        },
+        {
+          "items": [
+            {
+              "titulo": "CoinMarketCap",
+              "url": "https://coinmarketcap.com"
+            }
+          ],
+          "tipo": "enlaces"
+        }
+      ],
+      "estilo": "ficha",
+      "icono": "currency-btc",
+      "imagen": "",
+      "subtitulo": "En euros",
+      "titulo": "Bitcoin esta semana"
+    },
+    "fuentes": [
+      "coinmarketcap.com",
+      "coindesk.com"
+    ],
+    "pasos": [
+      {
+        "icono": "magnifying-glass",
+        "texto": "Busca «precio bitcoin semana»"
+      },
+      {
+        "icono": "globe",
+        "texto": "Lee coinmarketcap.com"
+      }
+    ],
+    "said": "¿Cómo ha ido el bitcoin esta semana?"
+  },
+  {
+    "card": {
+      "bloques": [
+        {
+          "fecha": "2027-08-02T10:45:00+02:00",
+          "texto": "para la totalidad",
+          "tipo": "cuenta"
+        },
+        {
+          "items": [
+            {
+              "color": "",
+              "detalle": "",
+              "icono": "",
+              "imagen": "",
+              "titulo": "Dónde es total",
+              "valor": "Cádiz, Málaga, Ceuta y Melilla"
+            },
+            {
+              "color": "",
+              "detalle": "",
+              "icono": "",
+              "imagen": "",
+              "titulo": "Duración",
+              "valor": "Hasta 4 min 30 s"
+            },
+            {
+              "color": "",
+              "detalle": "",
+              "icono": "",
+              "imagen": "",
+              "titulo": "Hora",
+              "valor": "Hacia las 10:45"
+            }
+          ],
+          "tipo": "datos"
+        },
+        {
+          "color": "mal",
+          "icono": "",
+          "texto": "Mira el Sol solo con gafas ISO 12312-2, salvo durante la totalidad.",
+          "tipo": "aviso",
+          "valor": "Gafas homologadas"
+        },
+        {
+          "items": [
+            {
+              "orden": "apunta eclipse el 2 de agosto de 2027 a las 10:30",
+              "titulo": "Apúntalo"
+            }
+          ],
+          "tipo": "acciones"
+        },
+        {
+          "items": [
+            {
+              "titulo": "¿Desde dónde se ve mejor?"
+            }
+          ],
+          "tipo": "preguntas"
+        }
+      ],
+      "estilo": "ficha",
+      "icono": "sun",
+      "imagen": "",
+      "subtitulo": "Lunes 2 de agosto de 2027",
+      "titulo": "Eclipse total de Sol"
+    },
+    "fuentes": [
+      "ign.es",
+      "esa.int"
+    ],
+    "pasos": [
+      {
+        "icono": "magnifying-glass",
+        "texto": "Busca «eclipse total 2027 España»"
+      },
+      {
+        "icono": "globe",
+        "texto": "Lee ign.es"
+      }
+    ],
+    "said": "¿Cuándo es el próximo eclipse visible desde España?"
+  },
+  {
+    "card": {
+      "bloques": [
+        {
+          "items": [
+            {
+              "color": "",
+              "detalle": "",
+              "icono": "sun",
+              "imagen": "",
+              "titulo": "Abre",
+              "valor": "9:30"
+            },
+            {
+              "color": "",
+              "detalle": "",
+              "icono": "clock",
+              "imagen": "",
+              "titulo": "Última subida",
+              "valor": "22:45"
+            },
+            {
+              "color": "",
+              "detalle": "",
+              "icono": "moon",
+              "imagen": "",
+              "titulo": "Cierra",
+              "valor": "23:45"
+            }
+          ],
+          "tipo": "tira"
+        },
+        {
+          "items": [
+            {
+              "color": "",
+              "detalle": "Adulto",
+              "icono": "ticket",
+              "imagen": "",
+              "titulo": "Ascensor a la cima",
+              "valor": "36,10 €"
+            },
+            {
+              "color": "",
+              "detalle": "Adulto",
+              "icono": "person-simple-walk",
+              "imagen": "",
+              "titulo": "Escaleras al 2.º piso",
+              "valor": "14,20 €"
+            }
+          ],
+          "tipo": "lista"
+        },
+        {
+          "items": [
+            {
+              "titulo": "Web oficial",
+              "url": "https://www.toureiffel.paris"
+            }
+          ],
+          "tipo": "enlaces"
+        }
+      ],
+      "estilo": "portada",
+      "icono": "map-pin",
+      "imagen": "https://upload.wikimedia.org/wikipedia/commons/thumb/8/85/Tour_Eiffel_Wikimedia_Commons_%28cropped%29.jpg/960px-Tour_Eiffel_Wikimedia_Commons_%28cropped%29.jpg",
+      "subtitulo": "Horarios y entradas",
+      "titulo": "Torre Eiffel"
+    },
+    "fuentes": [
+      "toureiffel.paris"
+    ],
+    "pasos": [
+      {
+        "icono": "magnifying-glass",
+        "texto": "Busca «Torre Eiffel horarios precios»"
+      },
+      {
+        "icono": "globe",
+        "texto": "Lee toureiffel.paris"
+      }
+    ],
+    "said": "Horarios de la Torre Eiffel"
+  },
+  {
+    "card": {
+      "bloques": [
+        {
+          "forma": "anillo",
+          "items": [
+            {
+              "numero": 2.9,
+              "titulo": "kitty"
+            },
+            {
+              "numero": 2.1,
+              "titulo": "Firefox"
+            },
+            {
+              "numero": 0.8,
+              "titulo": "Discord"
+            },
+            {
+              "numero": 0.6,
+              "titulo": "Spotify"
+            },
+            {
+              "numero": 0.3,
+              "titulo": "Otras"
+            }
+          ],
+          "texto": "horas",
+          "tipo": "grafica",
+          "unidad": "h"
+        },
+        {
+          "forma": "barras",
+          "items": [
+            {
+              "numero": 2.4,
+              "titulo": "9–12"
+            },
+            {
+              "numero": 1.1,
+              "titulo": "12–15"
+            },
+            {
+              "numero": 1.9,
+              "titulo": "15–18"
+            },
+            {
+              "numero": 1.2,
+              "titulo": "18–21"
+            }
+          ],
+          "texto": "Por franja",
+          "tipo": "grafica",
+          "unidad": "h"
+        }
+      ],
+      "estilo": "ficha",
+      "icono": "hourglass",
+      "imagen": "",
+      "subtitulo": "Por aplicación",
+      "titulo": "Hoy, 6 h 40 min de pantalla"
+    },
+    "fuentes": [],
+    "pasos": [
+      {
+        "icono": "book-open",
+        "texto": "Mira el diario de hoy"
+      }
+    ],
+    "said": "¿Cuánto he usado el ordenador hoy?"
+  },
+  {
+    "card": {
+      "bloques": [
+        {
+          "texto": "du -ah ~ 2>/dev/null | sort -rh | head -20",
+          "tipo": "codigo",
+          "valor": "sh"
+        },
+        {
+          "items": [
+            {
+              "color": "",
+              "detalle": "du -a, en tamaños legibles",
+              "icono": "",
+              "imagen": "",
+              "titulo": "Mide todo lo de tu carpeta",
+              "valor": ""
+            },
+            {
+              "color": "",
+              "detalle": "",
+              "icono": "",
+              "imagen": "",
+              "titulo": "Ordena de mayor a menor",
+              "valor": ""
+            },
+            {
+              "color": "",
+              "detalle": "",
+              "icono": "",
+              "imagen": "",
+              "titulo": "Quédate con los 20 primeros",
+              "valor": ""
+            }
+          ],
+          "tipo": "pasos"
+        },
+        {
+          "texto": "Con ncdu tienes lo mismo, navegable y con borrado.",
+          "tipo": "texto"
+        }
+      ],
+      "estilo": "ficha",
+      "icono": "terminal",
+      "imagen": "",
+      "subtitulo": "Desde la terminal",
+      "titulo": "Archivos grandes"
+    },
+    "fuentes": [],
+    "pasos": [
+      {
+        "icono": "sparkle",
+        "texto": "Compone la respuesta"
+      }
+    ],
+    "said": "¿Cómo busco archivos grandes en la terminal?"
+  },
+  {
+    "card": {
+      "bloques": [
+        {
+          "columnas": [
+            "",
+            "MacBook Air",
+            "ThinkPad X1",
+            "Framework 13"
+          ],
+          "items": [
+            {
+              "mejor": 1,
+              "titulo": "Peso",
+              "valores": [
+                "1,24 kg",
+                "1,09 kg",
+                "1,3 kg"
+              ]
+            },
+            {
+              "mejor": 0,
+              "titulo": "Batería",
+              "valores": [
+                "18 h",
+                "13 h",
+                "11 h"
+              ]
+            },
+            {
+              "mejor": 2,
+              "titulo": "Linux",
+              "valores": [
+                "Asahi",
+                "Excelente",
+                "Excelente"
+              ]
+            },
+            {
+              "mejor": 2,
+              "titulo": "Reparable",
+              "valores": [
+                "No",
+                "Algo",
+                "Del todo"
+              ]
+            }
+          ],
+          "tipo": "tabla"
+        },
+        {
+          "contras": [
+            "MacBook: Linux a medias",
+            "ThinkPad: el más caro"
+          ],
+          "pros": [
+            "Framework: lo arreglas tú",
+            "MacBook: batería de sobra"
+          ],
+          "tipo": "pros"
+        }
+      ],
+      "estilo": "ficha",
+      "icono": "laptop",
+      "imagen": "",
+      "subtitulo": "Para programar",
+      "titulo": "Tres portátiles ligeros"
+    },
+    "fuentes": [
+      "notebookcheck.net",
+      "framework.com"
+    ],
+    "pasos": [
+      {
+        "icono": "magnifying-glass",
+        "texto": "Busca «MacBook Air vs ThinkPad X1 Carbon vs Framework 13»"
+      }
+    ],
+    "said": "Compara MacBook Air, ThinkPad X1 y Framework 13"
+  },
+  {
+    "card": {
+      "bloques": [
+        {
+          "icono": "mountains",
+          "texto": "medición de 2020 (China y Nepal)",
+          "tipo": "cifra",
+          "valor": "8.849 m"
+        },
+        {
+          "texto": "Oxígeno en la cima frente al nivel del mar",
+          "tipo": "barra",
+          "valor": 0.33
+        },
+        {
+          "texto": "Crece unos 4 mm al año por el choque de las placas india y euroasiática.",
+          "tipo": "texto"
+        }
+      ],
+      "estilo": "titular",
+      "icono": "mountains",
+      "imagen": "",
+      "subtitulo": "El punto más alto de la Tierra",
+      "titulo": "Everest"
+    },
+    "fuentes": [],
+    "pasos": [],
+    "said": "¿Cuánto mide el Everest?"
+  }
+]

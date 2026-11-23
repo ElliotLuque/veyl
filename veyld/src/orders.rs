@@ -1109,15 +1109,22 @@ fn scheme(d: &mut Daemon, name: &str) -> Result<String, String> {
     Ok(format!("Esquema {shown}"))
 }
 
-fn shot(d: &Daemon, p: &Parse) -> Result<String, String> {
+fn shot(d: &mut Daemon, p: &Parse) -> Result<String, String> {
     need("grim")?;
     need("wl-copy")?;
-    if p.text("what") == "area" {
+    let area = p.text("what") == "area";
+    if area {
         need("slurp")?;
+    }
+    let monitor = d.hypr.monitor().unwrap_or_default();
+    // Veyl la guarda, la avisa con su imagen y destella; sin él, solo al portapapeles.
+    if veyl(d, "shot.take", json!([monitor, area, 0])).is_ok() {
+        return Ok(if area { "Elige la zona" } else { "Captura copiada" }.into());
+    }
+    if area {
         detach(&["sh", "-c", r#"area=$(slurp) && grim -g "$area" - | wl-copy --type image/png"#]);
         return Ok("Elige la zona".into());
     }
-    let monitor = d.hypr.monitor().unwrap_or_default();
     exec(&["sh", "-c", r#"grim ${1:+-o "$1"} - | wl-copy --type image/png"#, "sh", &monitor])?;
     Ok("Captura copiada".into())
 }

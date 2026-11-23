@@ -8,7 +8,8 @@ import qs
 // recibe, las guarda, decide cuáles salen como aviso y cuándo caducan, y le
 // cuenta a cada programa lo que haces con las suyas. Aquí está lo que él
 // cuenta (`Daemon` lo trae) y lo que hace falta para pintarlo: el velo apila
-// los avisos, la más reciente arriba, y el cajón enseña todas las guardadas.
+// los avisos, la más reciente arriba, y los Avisos del centro de control
+// enseñan todas las guardadas.
 Singleton {
     id: root
 
@@ -19,7 +20,7 @@ Singleton {
     // id de la notificación). Una que se va se queda un momento, `gone`, para
     // plegarse antes de dejar su sitio.
     readonly property ListModel deck: ListModel {}
-    // Las del cajón, en el mismo orden que `notes` (`key` es el id): cambia
+    // Las guardadas, en el mismo orden que `notes` (`key` es el id): cambia
     // solo lo que cambia, para que sus tarjetas no se rehagan.
     readonly property ListModel shelf: ListModel {}
     // Con el puntero encima, o escribiendo una respuesta, los avisos no caducan.

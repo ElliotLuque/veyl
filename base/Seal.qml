@@ -94,15 +94,29 @@ WlSessionLock {
                 ColorAnimation { duration: Tokens.veil }
             }
 
-            // Cuánto falta, en corto: «en 25 min», «en 2 h 10», «ahora».
+            // Cuánto falta, en corto: «en 25 min», «en 2 h 10», «en 2 días 19 h»,
+            // «en 1 semana 3 días», «en 2 meses», «ahora».
             function until(at: double): string {
                 const minutes = Math.ceil((at - now) / 60000);
-                if (minutes <= 0)
-                    return "ahora";
+                return minutes <= 0 ? "ahora" : `en ${lapse(minutes)}`;
+            }
+
+            // Un rato en la unidad más grande que quepa y, si suma, la siguiente.
+            function lapse(minutes: int): string {
+                const some = (count, one, many) => `${count} ${count === 1 ? one : many}`;
                 if (minutes < 60)
-                    return `en ${minutes} min`;
+                    return `${minutes} min`;
                 const hours = Math.floor(minutes / 60);
-                return minutes % 60 ? `en ${hours} h ${String(minutes % 60).padStart(2, "0")}` : `en ${hours} h`;
+                if (hours < 24)
+                    return minutes % 60 ? `${hours} h ${String(minutes % 60).padStart(2, "0")}` : `${hours} h`;
+                const days = Math.floor(hours / 24);
+                if (days < 7)
+                    return hours % 24 ? `${some(days, "día", "días")} ${hours % 24} h` : some(days, "día", "días");
+                if (days < 30)
+                    return days % 7 ? `${some(Math.floor(days / 7), "semana", "semanas")} ${some(days % 7, "día", "días")}` : some(days / 7, "semana", "semanas");
+                if (days < 365)
+                    return some(Math.floor(days / 30), "mes", "meses");
+                return some(Math.floor(days / 365), "año", "años");
             }
 
             // El fondo se desenfoca y oscurece al llegar.
@@ -494,7 +508,7 @@ WlSessionLock {
                                 anchors.right: parent.left
                                 anchors.rightMargin: -(day.rail - 18)
                                 anchors.verticalCenter: parent.verticalCenter
-                                text: agent.minutes < 1 ? "ahora" : agent.minutes < 60 ? `${agent.minutes} min` : `${Math.floor(agent.minutes / 60)} h`
+                                text: agent.minutes < 1 ? "ahora" : agent.minutes < 60 ? `${agent.minutes} min` : agent.minutes < 1440 ? `${Math.floor(agent.minutes / 60)} h` : root.lapse(agent.minutes).split(" ").slice(0, 2).join(" ")
                                 font.pixelSize: Tokens.smallSize
                                 dim: true
                             }

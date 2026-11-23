@@ -11,6 +11,11 @@ uso:
   veyl agent <id> working|needs|idle   anuncia en qué está un agente
                   [--window <dirección>]
   veyl agent <id> done                 el agente terminó: su punto se va
+  veyl agent answer <tecla>            contesta al agente que pregunta: una tecla de sus opciones
+                                       («1», «y») o accept, second o deny
+  veyl agent open                      lleva al agente que pregunta
+  veyl agent demo [<n>|off]            agentes de ejemplo: uno trabajando y otro preguntando
+                                       (cada vez, otra pregunta: un comando, una edición, Codex, pi…)
   veyl event <título> <HH:MM|+min>     apunta un evento hoy (mañana si la hora ya pasó)
   veyl event <título> <día> [HH:MM]    en un día: AAAA-MM-DD, hoy o mañana; sin hora, todo el día
   veyl event list                      lo que queda por delante, con su número
@@ -27,6 +32,7 @@ uso:
   veyl listen [on|off|toggle|demo]     modo escuchar (sin nada: alterna; demo: sin micro)
   veyl voice [get <modelo>]            los modelos de voz; get trae uno: «veyl voice get small-q5_1»
   veyl lock                            bloquea la pantalla
+  veyl shot [area|screen]              recorta una zona (sin nada) o captura la pantalla entera
   veyl settings [<sección>|close]      abre o cierra los ajustes; en una sección (look, sound,
                                        screens, network, bluetooth, input, alerts, calendars, voice,
                                        journal, session, nix, about)
@@ -42,6 +48,9 @@ uso:
                                        --full, todo con detalle; --json, en datos
   veyl timeline [<cuándo…>]            lo mismo, rato a rato: «veyl timeline ayer»
   veyl find <texto…>                   cuándo salió algo en el diario: «veyl find fallout»
+  veyl cards [<n>|next|prev|close|list]
+                                       la galería de tarjetas del cerebro: un ejemplo de cada pieza
+  veyl cards demo [<n>]                lo mismo, entero: «Pensando» con sus pasos y luego la tarjeta
   veyl launcher [<vista>|close|<texto>]
                                        abre o cierra la entrada; en una vista
                                        (clipboard, outputs, inputs, schemes),
@@ -93,6 +102,19 @@ run)
     exec qs -p "$root"
     ;;
 agent)
+    if [ "${2:-}" = demo ]; then
+        bin=$(daemon)
+        exec "$bin" agents demo ${3:+"$3"}
+    fi
+    if [ "${2:-}" = answer ]; then
+        [ $# -ge 3 ] || usage
+        call agents answer "$3"
+        exit
+    fi
+    if [ "${2:-}" = open ]; then
+        call agents open
+        exit
+    fi
     [ $# -ge 3 ] || usage
     id=$2 phase=$3
     shift 3
@@ -144,6 +166,12 @@ event)
         *) usage ;;
         esac
         ;;
+    esac
+    ;;
+shot)
+    case "${2:-area}" in
+    area | screen) call shot "${2:-area}" ;;
+    *) usage ;;
     esac
     ;;
 timer)
@@ -245,6 +273,20 @@ find)
     [ $# -ge 1 ] || usage
     bin=$(daemon)
     exec "$bin" find "$@"
+    ;;
+cards)
+    shift
+    case "${1:-}" in
+    "") call cards open 0 ;;
+    next | prev | close) call cards "$1" ;;
+    list) qs -p "$root" ipc call cards list 2>/dev/null || {
+        echo "veyl: el estado base no está en marcha" >&2
+        exit 1
+    } ;;
+    demo) call cards demo "${2:-0}" ;;
+    *[!0-9]*) usage ;;
+    *) call cards open "$1" ;;
+    esac
     ;;
 launcher)
     shift

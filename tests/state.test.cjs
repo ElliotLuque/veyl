@@ -390,3 +390,51 @@ test('deshacer vuelve a lo declarado, o a lo de fábrica si no se declaró', () 
     assert.equal(n.Settings.scheme, 'b');
     assert.deepEqual(json(n.Settings.voice), {});
 });
+
+function daemon() {
+    const d = load('Daemon', {
+        thinking: null, card: null, shut: null, query: '', serial: 0, connected: true, sent: [], Recall: {},
+        link: { write(text) { d.sent.push(JSON.parse(text)); }, flush() {} },
+    });
+    return d;
+}
+
+test('la tarjeta del cerebro sale en cuanto se compone y se completa sin rehacerse', () => {
+    const d = daemon();
+    const say = message => d.receive(JSON.stringify(message));
+    say({ thinking: { said: '¿cuándo sale GTA 6?', since: 1, n: 4, stop: true, steps: [] } });
+    say({ card: { n: 4, live: true, titulo: 'GTA VI', bloques: [{ tipo: 'texto', texto: 'Sale en 2026' }] } });
+    // Cada paso de la misma pregunta no se lleva la tarjeta.
+    say({ thinking: { said: '¿cuándo sale GTA 6?', since: 1, n: 4, steps: [{ icono: 'globe', texto: 'Lee ign.com' }] } });
+    assert.equal(d.card.titulo, 'GTA VI');
+    say({ card_patch: { n: 4, imagen: 'https://ign.com/gta.jpg' } });
+    say({ card_patch: { n: 9, imagen: 'https://otra.com/x.jpg' } });
+    assert.equal(d.card.imagen, 'https://ign.com/gta.jpg');
+    assert.equal(d.card.live, true);
+    say({ card: { n: 4, titulo: 'GTA VI', say: 'Sale el 19 de noviembre', imagen: 'https://ign.com/gta.jpg', bloques: [] } });
+    assert.equal(d.card.live, undefined);
+    say({ thinking: null });
+    assert.equal(d.card.say, 'Sale el 19 de noviembre');
+});
+
+test('una tarjeta cerrada no vuelve aunque le llegue algo; una pregunta nueva la recoge', () => {
+    const d = daemon();
+    const say = message => d.receive(JSON.stringify(message));
+    say({ thinking: { said: 'x', since: 1, n: 5 } });
+    say({ card: { n: 5, live: true, titulo: 'X', bloques: [] } });
+    d.close();
+    say({ card_patch: { n: 5, imagen: 'https://a/b.jpg' } });
+    say({ card: { n: 5, titulo: 'X', say: 'Hecho', bloques: [] } });
+    assert.equal(d.card, null);
+    // Las de la gramática no llevan número: siempre salen.
+    say({ card: { titulo: 'Hoy', bloques: [] } });
+    assert.equal(d.card.titulo, 'Hoy');
+    say({ thinking: { said: 'y', since: 2, n: 6, stop: true } });
+    assert.equal(d.card, null);
+    d.stop();
+    assert.deepEqual(d.sent.at(-1), { stop: 6 });
+    // Un veyld de antes no numera: cada pregunta recoge la tarjeta, como siempre.
+    say({ card: { titulo: 'Z', bloques: [] } });
+    say({ thinking: { said: 'z', since: 3 } });
+    assert.equal(d.card, null);
+});
