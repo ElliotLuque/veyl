@@ -1,6 +1,7 @@
 import QtQuick
 import Quickshell
 import qs
+import qs.base.card
 import qs.state
 
 // La tarjeta que el cerebro compone para una pregunta: la respuesta a la
@@ -138,101 +139,6 @@ Item {
     implicitWidth: wide ? Math.min(Tokens.answerWide, room) : Tokens.answer
     implicitHeight: Math.min(content.height, limit)
 
-    component Pill: Rectangle {
-        id: pill
-
-        property alias text: label.text
-        property string icon: ""
-        // Los botones, siempre del acento del tema: el color de la tarjeta es
-        // para iconos y resaltes, no para cambiar la estética.
-        property color tone: Tokens.accent
-        property bool solid: false
-        signal pressed
-
-        width: row.implicitWidth + 26
-        height: 32
-        radius: height / 2
-        color: solid ? (area.containsMouse ? Qt.lighter(tone, 1.15) : tone) : (area.containsMouse ? root.soft(tone, 0.28) : root.soft(tone, 0.16))
-
-        Behavior on color {
-            ColorAnimation { duration: Tokens.fast }
-        }
-
-        Row {
-            id: row
-            anchors.centerIn: parent
-            spacing: 6
-
-            Icon {
-                anchors.verticalCenter: parent.verticalCenter
-                name: pill.icon
-                color: pill.solid ? Tokens.bg : pill.tone
-                visible: pill.icon !== ""
-            }
-
-            Ink {
-                id: label
-                anchors.verticalCenter: parent.verticalCenter
-                width: Math.min(implicitWidth, 300)
-                elide: Text.ElideRight
-                font.pixelSize: Tokens.smallSize
-                strong: true
-                color: pill.solid ? Tokens.bg : Tokens.text
-            }
-        }
-
-        MouseArea {
-            id: area
-            anchors.fill: parent
-            hoverEnabled: true
-            cursorShape: Qt.PointingHandCursor
-            onClicked: pill.pressed()
-        }
-    }
-
-    // Un icono en su círculo del color de la pieza.
-    component Badge: Rectangle {
-        property string icon: ""
-        property color tone: root.tone
-        property int size: 30
-
-        width: size
-        height: size
-        radius: size / 2
-        color: root.soft(tone, 0.18)
-
-        Icon {
-            anchors.centerIn: parent
-            name: parent.icon
-            color: parent.tone
-            font.pixelSize: Math.round(parent.size * 0.55)
-        }
-    }
-
-    // Una imagen de la web, con esquinas redondeadas; sin alto hasta que carga
-    // (si no carga, no está).
-    component Picture: Clip {
-        id: frame
-
-        property alias source: art.source
-        property int tall: 200
-        readonly property bool ready: art.status === Image.Ready
-
-        height: ready ? tall : 0
-        visible: ready
-        radius: Tokens.radius
-        color: Tokens.surface
-
-        Image {
-            id: art
-            anchors.fill: parent
-            sourceSize.width: frame.width * 2
-            fillMode: Image.PreserveAspectCrop
-            asynchronous: true
-            cache: true
-        }
-    }
-
     component Piece: Loader {
         id: piece
 
@@ -297,1373 +203,198 @@ Item {
         Component {
             id: prose
 
-            Ink {
-                width: piece.width
-                wrapMode: Text.WordWrap
-                lineHeight: 1.2
-                text: piece.modelData.texto
+            Prose {
+                block: piece
+                host: root
             }
         }
 
         Component {
             id: list
 
-            Column {
-                width: piece.width
-                spacing: 10
-
-                Repeater {
-                    model: piece.modelData.items
-
-                    Item {
-                        id: entry
-
-                        required property var modelData
-                        readonly property color tone: root.tint(modelData.color, piece.tone)
-
-                        width: piece.width
-                        implicitHeight: Math.max(lead.height, words.implicitHeight)
-
-                        Item {
-                            id: lead
-                            width: thumb.ready ? 48 : 30
-                            height: thumb.ready ? 48 : 30
-                            anchors.verticalCenter: parent.verticalCenter
-
-                            Picture {
-                                id: thumb
-                                width: 48
-                                tall: 48
-                                radius: 8
-                                source: entry.modelData.imagen
-                            }
-
-                            Badge {
-                                visible: !thumb.ready
-                                tone: entry.tone
-                                icon: entry.modelData.icono || "arrow-right"
-                            }
-                        }
-
-                        Column {
-                            id: words
-                            x: lead.width + 12
-                            width: parent.width - x - value.width - 12
-                            anchors.verticalCenter: parent.verticalCenter
-                            spacing: 2
-
-                            Ink {
-                                width: parent.width
-                                wrapMode: Text.WordWrap
-                                text: entry.modelData.titulo
-                            }
-
-                            Ink {
-                                width: parent.width
-                                dim: true
-                                font.pixelSize: Tokens.smallSize
-                                wrapMode: Text.WordWrap
-                                maximumLineCount: 3
-                                elide: Text.ElideRight
-                                text: entry.modelData.detalle
-                                visible: text !== ""
-                            }
-                        }
-
-                        Ink {
-                            id: value
-                            anchors.right: parent.right
-                            anchors.verticalCenter: parent.verticalCenter
-                            strong: true
-                            color: entry.tone
-                            text: entry.modelData.valor
-                        }
-                    }
-                }
+            Bullets {
+                block: piece
+                host: root
             }
         }
 
         Component {
             id: pairs
 
-            Rectangle {
-                width: piece.width
-                implicitHeight: grid.implicitHeight + 20
-                radius: Tokens.radius
-                color: Tokens.surface
-
-                Grid {
-                    id: grid
-                    x: 14
-                    y: 10
-                    width: parent.width - 28
-                    columns: 2
-                    columnSpacing: 16
-                    rowSpacing: 8
-
-                    Repeater {
-                        // Sin flatMap: el JS de QML no lo tiene.
-                        model: {
-                            const cells = [];
-                            for (const i of piece.modelData.items)
-                                cells.push({ text: i.titulo, dim: true }, { text: i.valor, dim: false });
-                            return cells;
-                        }
-
-                        Ink {
-                            required property var modelData
-                            width: (grid.width - 16) / 2
-                            wrapMode: Text.WordWrap
-                            dim: modelData.dim
-                            strong: !modelData.dim
-                            horizontalAlignment: modelData.dim ? Text.AlignLeft : Text.AlignRight
-                            text: modelData.text
-                        }
-                    }
-                }
+            Pairs {
+                block: piece
+                host: root
             }
         }
 
         Component {
             id: figure
 
-            Rectangle {
-                width: piece.width
-                implicitHeight: Math.max(84, figureText.implicitHeight + 28)
-                radius: Tokens.radius
-                color: Tokens.surface
-
-                Badge {
-                    id: sign
-                    x: 14
-                    anchors.verticalCenter: parent.verticalCenter
-                    size: 40
-                    tone: piece.tone
-                    icon: piece.modelData.icono ?? ""
-                    visible: icon !== ""
-                }
-
-                Column {
-                    id: figureText
-                    x: sign.visible ? sign.x + sign.width + 14 : 16
-                    width: parent.width - x - 16
-                    anchors.verticalCenter: parent.verticalCenter
-
-                    // Grande si es corta; si es larga, menor y en dos líneas.
-                    Ink {
-                        width: parent.width
-                        strong: true
-                        font.pixelSize: piece.modelData.valor.length > 14 ? 24 : 36
-                        wrapMode: Text.WordWrap
-                        maximumLineCount: 2
-                        elide: Text.ElideRight
-                        color: piece.tone
-                        text: piece.modelData.valor
-                    }
-
-                    Ink {
-                        width: parent.width
-                        dim: true
-                        elide: Text.ElideRight
-                        text: piece.modelData.texto
-                        visible: text !== ""
-                    }
-                }
+            Figure {
+                block: piece
+                host: root
             }
         }
 
         Component {
             id: countdown
 
-            Rectangle {
-                id: clock
-
-                property real now: Date.now()
-                readonly property real at: Date.parse(piece.modelData.fecha)
-                readonly property real remaining: (at - now) / 1000
-                readonly property bool past: remaining <= 0
-                readonly property var parts: {
-                    const s = Math.abs(remaining);
-                    return [[Math.floor(s / 86400), "días"], [Math.floor(s % 86400 / 3600), "horas"], [Math.floor(s % 3600 / 60), "min"], [Math.floor(s % 60), "s"]];
-                }
-
-                width: piece.width
-                implicitHeight: units.height + caption.implicitHeight + 34
-                radius: Tokens.radius
-                color: Tokens.surface
-
-                // Cuatro veces por segundo, para que los segundos no salten de dos en dos.
-                Timer {
-                    running: clock.visible
-                    repeat: true
-                    interval: 250
-                    onTriggered: clock.now = Date.now()
-                }
-
-                Ink {
-                    id: caption
-                    x: 16
-                    y: 12
-                    width: parent.width - 32
-                    dim: true
-                    font.pixelSize: Tokens.smallSize
-                    elide: Text.ElideRight
-                    text: (piece.modelData.texto || "") + (clock.past ? " · hace" : " · faltan")
-                }
-
-                Row {
-                    id: units
-                    x: 16
-                    y: caption.y + caption.height + 8
-                    spacing: 10
-
-                    Repeater {
-                        model: clock.parts
-
-                        Rectangle {
-                            required property var modelData
-                            width: (piece.width - 32 - 30) / 4
-                            height: 58
-                            radius: 8
-                            color: Tokens.plate
-
-                            Column {
-                                anchors.centerIn: parent
-
-                                Ink {
-                                    anchors.horizontalCenter: parent.horizontalCenter
-                                    strong: true
-                                    font.pixelSize: Tokens.figureSize
-                                    color: piece.tone
-                                    text: modelData[0]
-                                }
-
-                                Ink {
-                                    anchors.horizontalCenter: parent.horizontalCenter
-                                    dim: true
-                                    font.pixelSize: Tokens.tinySize
-                                    text: modelData[1]
-                                }
-                            }
-                        }
-                    }
-                }
+            Remaining {
+                block: piece
+                host: root
             }
         }
 
         Component {
             id: meter
 
-            Column {
-                width: piece.width
-                spacing: 6
-
-                Item {
-                    width: parent.width
-                    implicitHeight: percent.implicitHeight
-
-                    Ink {
-                        width: parent.width - percent.width - 8
-                        dim: true
-                        elide: Text.ElideRight
-                        text: piece.modelData.texto
-                    }
-
-                    Ink {
-                        id: percent
-                        anchors.right: parent.right
-                        strong: true
-                        color: piece.tone
-                        text: Math.round(piece.modelData.valor * 100) + " %"
-                    }
-                }
-
-                Rectangle {
-                    width: parent.width
-                    height: 6
-                    radius: 3
-                    color: Tokens.surface
-
-                    Rectangle {
-                        width: parent.width * piece.modelData.valor
-                        height: parent.height
-                        radius: 3
-                        color: piece.tone
-                    }
-                }
+            Meter {
+                block: piece
+                host: root
             }
         }
 
         Component {
             id: bars
 
-            Column {
-                id: chart
-
-                readonly property var points: piece.modelData.items
-                readonly property real most: Math.max(1e-9, Math.max.apply(null, points.map(p => p.numero)))
-
-                width: piece.width
-                spacing: 8
-
-                Ink {
-                    width: parent.width
-                    dim: true
-                    font.pixelSize: Tokens.smallSize
-                    elide: Text.ElideRight
-                    text: piece.modelData.texto
-                    visible: text !== ""
-                }
-
-                Row {
-                    id: columns
-                    width: parent.width
-                    height: 160
-                    spacing: 6
-
-                    Repeater {
-                        model: chart.points
-
-                        Item {
-                            id: column
-
-                            required property var modelData
-                            readonly property bool peak: modelData.numero === chart.most
-
-                            width: (columns.width - columns.spacing * (chart.points.length - 1)) / chart.points.length
-                            height: columns.height
-
-                            Ink {
-                                anchors.horizontalCenter: parent.horizontalCenter
-                                anchors.bottom: bar.top
-                                anchors.bottomMargin: 4
-                                font.pixelSize: Tokens.tinySize
-                                strong: column.peak
-                                dim: !column.peak
-                                text: root.figure(column.modelData.numero, piece.modelData.unidad)
-                            }
-
-                            Rectangle {
-                                id: bar
-                                anchors.bottom: label.top
-                                anchors.bottomMargin: 6
-                                anchors.horizontalCenter: parent.horizontalCenter
-                                width: Math.min(parent.width, 40)
-                                height: Math.max(3, (parent.height - label.height - 30) * Math.max(0, column.modelData.numero) / chart.most)
-                                radius: 4
-                                color: column.peak ? piece.tone : root.soft(piece.tone, 0.4)
-                            }
-
-                            Ink {
-                                id: label
-                                anchors.bottom: parent.bottom
-                                width: parent.width
-                                horizontalAlignment: Text.AlignHCenter
-                                elide: Text.ElideRight
-                                dim: true
-                                font.pixelSize: Tokens.tinySize
-                                text: column.modelData.titulo
-                            }
-                        }
-                    }
-                }
+            Bars {
+                block: piece
+                host: root
             }
         }
 
         Component {
             id: lines
 
-            Column {
-                id: trend
-
-                readonly property var points: piece.modelData.items
-                readonly property real high: Math.max.apply(null, points.map(p => p.numero))
-                readonly property real low: Math.min.apply(null, points.map(p => p.numero))
-
-                width: piece.width
-                spacing: 6
-
-                Ink {
-                    width: parent.width
-                    dim: true
-                    font.pixelSize: Tokens.smallSize
-                    elide: Text.ElideRight
-                    text: piece.modelData.texto
-                    visible: text !== ""
-                }
-
-                Item {
-                    width: parent.width
-                    height: 150
-
-                    Canvas {
-                        id: plot
-                        anchors.fill: parent
-                        anchors.topMargin: 18
-                        anchors.bottomMargin: 18
-                        onWidthChanged: requestPaint()
-                        Component.onCompleted: requestPaint()
-                        onPaint: {
-                            const ctx = getContext("2d");
-                            ctx.reset();
-                            const points = trend.points, n = points.length, pad = 6;
-                            const span = (trend.high - trend.low) || 1;
-                            const xy = points.map((p, i) => [pad + (width - pad * 2) * i / (n - 1), pad + (height - pad * 2) * (1 - (p.numero - trend.low) / span)]);
-                            const a = piece.tone;
-                            ctx.beginPath();
-                            xy.forEach((p, i) => i ? ctx.lineTo(p[0], p[1]) : ctx.moveTo(p[0], p[1]));
-                            ctx.strokeStyle = a;
-                            ctx.lineWidth = 2.5;
-                            ctx.lineJoin = "round";
-                            ctx.stroke();
-                            const last = xy[n - 1];
-                            ctx.beginPath();
-                            ctx.arc(last[0], last[1], 4.5, 0, Math.PI * 2);
-                            ctx.fillStyle = a;
-                            ctx.fill();
-                        }
-                    }
-
-                    Ink {
-                        anchors.top: parent.top
-                        dim: true
-                        font.pixelSize: Tokens.tinySize
-                        text: "máx. " + root.figure(trend.high, piece.modelData.unidad)
-                    }
-
-                    Ink {
-                        anchors.bottom: parent.bottom
-                        dim: true
-                        font.pixelSize: Tokens.tinySize
-                        text: "mín. " + root.figure(trend.low, piece.modelData.unidad)
-                    }
-
-                    Ink {
-                        anchors.top: parent.top
-                        anchors.right: parent.right
-                        strong: true
-                        color: piece.tone
-                        font.pixelSize: Tokens.smallSize
-                        text: root.figure(trend.points[trend.points.length - 1].numero, piece.modelData.unidad)
-                    }
-                }
-
-                Item {
-                    width: parent.width
-                    implicitHeight: first.implicitHeight
-
-                    Ink {
-                        id: first
-                        dim: true
-                        font.pixelSize: Tokens.tinySize
-                        text: trend.points[0].titulo
-                    }
-
-                    Ink {
-                        anchors.horizontalCenter: parent.horizontalCenter
-                        dim: true
-                        font.pixelSize: Tokens.tinySize
-                        text: trend.points.length > 2 ? trend.points[Math.floor(trend.points.length / 2)].titulo : ""
-                    }
-
-                    Ink {
-                        anchors.right: parent.right
-                        dim: true
-                        font.pixelSize: Tokens.tinySize
-                        text: trend.points[trend.points.length - 1].titulo
-                    }
-                }
+            Trend {
+                block: piece
+                host: root
             }
         }
 
         Component {
             id: ring
 
-            Item {
-                id: pie
-
-                readonly property var points: piece.modelData.items
-                readonly property real total: points.reduce((sum, p) => sum + p.numero, 0)
-
-                function shade(i: int): color {
-                    return root.soft(piece.tone, [1, 0.7, 0.5, 0.35, 0.24, 0.16][i % 6]);
-                }
-
-                width: piece.width
-                implicitHeight: Math.max(150, legend.implicitHeight)
-
-                Canvas {
-                    id: donut
-                    width: 150
-                    height: 150
-                    anchors.verticalCenter: parent.verticalCenter
-                    Component.onCompleted: requestPaint()
-                    onPaint: {
-                        const ctx = getContext("2d");
-                        ctx.reset();
-                        let start = -Math.PI / 2;
-                        pie.points.forEach((p, i) => {
-                            const sweep = Math.PI * 2 * p.numero / pie.total;
-                            ctx.beginPath();
-                            ctx.arc(75, 75, 60, start + 0.025, start + sweep - 0.025);
-                            ctx.strokeStyle = pie.shade(i);
-                            ctx.lineWidth = 20;
-                            ctx.stroke();
-                            start += sweep;
-                        });
-                    }
-
-                    Column {
-                        anchors.centerIn: parent
-                        width: 90
-
-                        Ink {
-                            width: parent.width
-                            horizontalAlignment: Text.AlignHCenter
-                            strong: true
-                            font.pixelSize: Tokens.clockSize
-                            elide: Text.ElideRight
-                            text: root.figure(pie.total, piece.modelData.unidad)
-                        }
-
-                        Ink {
-                            width: parent.width
-                            horizontalAlignment: Text.AlignHCenter
-                            dim: true
-                            font.pixelSize: Tokens.tinySize
-                            elide: Text.ElideRight
-                            text: piece.modelData.texto || "total"
-                        }
-                    }
-                }
-
-                Column {
-                    id: legend
-                    x: donut.width + 20
-                    width: parent.width - x
-                    anchors.verticalCenter: parent.verticalCenter
-                    spacing: 7
-
-                    Repeater {
-                        model: pie.points
-
-                        Item {
-                            id: slice
-
-                            required property var modelData
-                            required property int index
-
-                            width: legend.width
-                            implicitHeight: name.implicitHeight
-
-                            Rectangle {
-                                anchors.verticalCenter: parent.verticalCenter
-                                width: 10
-                                height: 10
-                                radius: 3
-                                color: pie.shade(slice.index)
-                            }
-
-                            Ink {
-                                id: name
-                                x: 18
-                                width: parent.width - x - share.width - 8
-                                elide: Text.ElideRight
-                                font.pixelSize: Tokens.smallSize
-                                text: slice.modelData.titulo
-                            }
-
-                            Ink {
-                                id: share
-                                anchors.right: parent.right
-                                strong: true
-                                font.pixelSize: Tokens.smallSize
-                                text: Math.round(slice.modelData.numero / pie.total * 100) + " %"
-                            }
-                        }
-                    }
-                }
+            Ring {
+                block: piece
+                host: root
             }
         }
 
         Component {
             id: table
 
-            Rectangle {
-                id: sheet
-
-                readonly property var heads: piece.modelData.columnas
-                readonly property int wide: Math.max(heads.length, 1 + Math.max.apply(null, piece.modelData.items.map(r => r.valores.length)))
-
-                width: piece.width
-                implicitHeight: rows.implicitHeight + 8
-                radius: Tokens.radius
-                color: Tokens.surface
-
-                Column {
-                    id: rows
-                    y: 4
-                    width: parent.width
-
-                    Item {
-                        width: parent.width
-                        height: 32
-                        visible: sheet.heads.some(h => h !== "")
-
-                        Row {
-                            x: 14
-                            width: parent.width - 28
-                            anchors.verticalCenter: parent.verticalCenter
-
-                            Repeater {
-                                model: sheet.wide
-
-                                Ink {
-                                    required property int index
-                                    width: parent.width / sheet.wide
-                                    horizontalAlignment: index ? Text.AlignRight : Text.AlignLeft
-                                    elide: Text.ElideRight
-                                    strong: index > 0
-                                    dim: true
-                                    font.pixelSize: Tokens.smallSize
-                                    text: sheet.heads[index] ?? ""
-                                }
-                            }
-                        }
-                    }
-
-                    Repeater {
-                        model: piece.modelData.items
-
-                        Rectangle {
-                            id: line
-
-                            required property var modelData
-                            required property int index
-
-                            width: rows.width
-                            height: Math.max(34, cells.implicitHeight + 14)
-                            color: index % 2 ? "transparent" : root.soft(Tokens.text, 0.035)
-
-                            Row {
-                                id: cells
-                                x: 14
-                                width: parent.width - 28
-                                anchors.verticalCenter: parent.verticalCenter
-
-                                Ink {
-                                    width: cells.width / sheet.wide
-                                    dim: true
-                                    wrapMode: Text.WordWrap
-                                    text: line.modelData.titulo
-                                }
-
-                                Repeater {
-                                    model: sheet.wide - 1
-
-                                    Ink {
-                                        required property int index
-                                        readonly property bool best: line.modelData.mejor === index
-
-                                        width: cells.width / sheet.wide
-                                        horizontalAlignment: Text.AlignRight
-                                        wrapMode: Text.WordWrap
-                                        strong: best
-                                        color: best ? piece.tone : Tokens.text
-                                        text: line.modelData.valores[index] ?? ""
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
+            Sheet {
+                block: piece
+                host: root
             }
         }
 
         Component {
             id: proscons
 
-            Row {
-                id: sides
-
-                readonly property bool both: piece.modelData.pros.length > 0 && piece.modelData.contras.length > 0
-
-                width: piece.width
-                spacing: 10
-
-                Repeater {
-                    model: [
-                        { head: "A favor", icon: "check-circle", tone: Tokens.done, list: piece.modelData.pros },
-                        { head: "En contra", icon: "x-circle", tone: Tokens.critical, list: piece.modelData.contras }
-                    ]
-
-                    Rectangle {
-                        id: side
-
-                        required property var modelData
-
-                        width: sides.both ? (sides.width - sides.spacing) / 2 : sides.width
-                        implicitHeight: points.implicitHeight + 24
-                        radius: Tokens.radius
-                        color: Tokens.surface
-                        visible: modelData.list.length > 0
-
-                        Column {
-                            id: points
-                            x: 12
-                            y: 12
-                            width: parent.width - 24
-                            spacing: 8
-
-                            Ink {
-                                dim: true
-                                strong: true
-                                font.pixelSize: Tokens.smallSize
-                                text: side.modelData.head
-                            }
-
-                            Repeater {
-                                model: side.modelData.list
-
-                                Item {
-                                    required property string modelData
-
-                                    width: points.width
-                                    implicitHeight: Math.max(18, said.implicitHeight)
-
-                                    Icon {
-                                        name: side.modelData.icon
-                                        color: side.modelData.tone
-                                        font.pixelSize: 16
-                                    }
-
-                                    Ink {
-                                        id: said
-                                        x: 24
-                                        width: parent.width - x
-                                        wrapMode: Text.WordWrap
-                                        font.pixelSize: Tokens.smallSize
-                                        text: parent.modelData
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
+            ProsCons {
+                block: piece
+                host: root
             }
         }
 
         Component {
             id: tiles
 
-            Grid {
-                id: mosaic
-                width: piece.width
-                columns: piece.modelData.items.length === 4 ? 2 : Math.min(3, piece.modelData.items.length)
-                spacing: 8
-
-                Repeater {
-                    model: piece.modelData.items
-
-                    Rectangle {
-                        id: tile
-
-                        required property var modelData
-                        required property int index
-                        readonly property color tone: piece.tone
-                        readonly property var serie: modelData.serie ?? []
-
-                        width: (mosaic.width - mosaic.spacing * (mosaic.columns - 1)) / mosaic.columns
-                        implicitHeight: stat.implicitHeight + 24 + (spark.visible ? spark.height + 6 : 0)
-                        radius: Tokens.radius
-                        color: Tokens.surface
-
-                        // Un filo del tono arriba.
-                        Rectangle {
-                            x: 12
-                            width: 22
-                            height: 3
-                            radius: 2
-                            color: tile.tone
-                        }
-
-                        Canvas {
-                            id: spark
-                            x: 12
-                            anchors.bottom: parent.bottom
-                            anchors.bottomMargin: 10
-                            width: parent.width - 24
-                            height: 30
-                            visible: tile.serie.length >= 2
-                            onWidthChanged: requestPaint()
-                            Component.onCompleted: requestPaint()
-                            onPaint: {
-                                const ctx = getContext("2d");
-                                ctx.reset();
-                                const n = tile.serie, hi = Math.max.apply(null, n), lo = Math.min.apply(null, n), span = (hi - lo) || 1;
-                                const xy = n.map((v, i) => [width * i / (n.length - 1), 3 + (height - 6) * (1 - (v - lo) / span)]);
-                                const c = tile.tone;
-                                ctx.beginPath();
-                                xy.forEach((p, i) => i ? ctx.lineTo(p[0], p[1]) : ctx.moveTo(p[0], p[1]));
-                                ctx.strokeStyle = c;
-                                ctx.lineWidth = 2;
-                                ctx.lineJoin = "round";
-                                ctx.stroke();
-                            }
-                        }
-
-                        Column {
-                            id: stat
-                            x: 12
-                            y: 12
-                            width: parent.width - 24
-                            spacing: 3
-
-                            Row {
-                                spacing: 6
-
-                                Icon {
-                                    anchors.verticalCenter: parent.verticalCenter
-                                    name: tile.modelData.icono
-                                    color: tile.tone
-                                    font.pixelSize: 15
-                                    visible: name !== ""
-                                }
-
-                                Ink {
-                                    width: stat.width - 21
-                                    dim: true
-                                    font.pixelSize: Tokens.smallSize
-                                    elide: Text.ElideRight
-                                    text: tile.modelData.titulo
-                                }
-                            }
-
-                            Ink {
-                                width: parent.width
-                                strong: true
-                                font.pixelSize: Tokens.figureSize
-                                elide: Text.ElideRight
-                                text: tile.modelData.valor
-                            }
-
-                            Ink {
-                                width: parent.width
-                                font.pixelSize: Tokens.smallSize
-                                elide: Text.ElideRight
-                                color: root.tint(tile.modelData.color, Tokens.dim)
-                                text: tile.modelData.detalle
-                                visible: text !== ""
-                            }
-                        }
-                    }
-                }
+            Tiles {
+                block: piece
+                host: root
             }
         }
 
         Component {
             id: strip
 
-            Flickable {
-                id: rail
-
-                readonly property int shown: Math.min(piece.modelData.items.length, 6)
-
-                width: piece.width
-                height: 112
-                contentWidth: band.width
-                flickableDirection: Flickable.HorizontalFlick
-                interactive: contentWidth > width
-                clip: true
-
-                Row {
-                    id: band
-                    spacing: 8
-
-                    Repeater {
-                        model: piece.modelData.items
-
-                        Rectangle {
-                            id: slot
-
-                            required property var modelData
-                            required property int index
-
-                            width: Math.max(76, (rail.width - band.spacing * (rail.shown - 1)) / rail.shown)
-                            height: rail.height
-                            radius: Tokens.radius
-                            color: index === 0 ? root.soft(piece.tone, 0.14) : Tokens.surface
-
-                            Column {
-                                anchors.centerIn: parent
-                                width: parent.width - 12
-                                spacing: 6
-
-                                Ink {
-                                    width: parent.width
-                                    horizontalAlignment: Text.AlignHCenter
-                                    elide: Text.ElideRight
-                                    dim: true
-                                    font.pixelSize: Tokens.smallSize
-                                    text: slot.modelData.titulo
-                                }
-
-                                Icon {
-                                    anchors.horizontalCenter: parent.horizontalCenter
-                                    name: slot.modelData.icono
-                                    color: piece.tone
-                                    font.pixelSize: 24
-                                    visible: name !== ""
-                                }
-
-                                Ink {
-                                    width: parent.width
-                                    horizontalAlignment: Text.AlignHCenter
-                                    elide: Text.ElideRight
-                                    strong: true
-                                    text: slot.modelData.valor
-                                }
-
-                                Ink {
-                                    width: parent.width
-                                    horizontalAlignment: Text.AlignHCenter
-                                    elide: Text.ElideRight
-                                    dim: true
-                                    font.pixelSize: Tokens.tinySize
-                                    text: slot.modelData.detalle
-                                    visible: text !== ""
-                                }
-                            }
-                        }
-                    }
-                }
+            Rail {
+                block: piece
+                host: root
             }
         }
 
         Component {
             id: steps
 
-            Column {
-                width: piece.width
-
-                Repeater {
-                    model: piece.modelData.items
-
-                    Item {
-                        id: step
-
-                        required property var modelData
-                        required property int index
-                        readonly property bool last: index === piece.modelData.items.length - 1
-
-                        width: piece.width
-                        implicitHeight: Math.max(28, words.implicitHeight) + (last ? 0 : 14)
-
-                        Rectangle {
-                            x: 13
-                            y: 30
-                            width: 2
-                            height: parent.height - 32
-                            color: Tokens.border
-                            visible: !step.last
-                        }
-
-                        Rectangle {
-                            width: 28
-                            height: 28
-                            radius: 14
-                            color: root.soft(piece.tone, 0.16)
-
-                            Ink {
-                                anchors.centerIn: parent
-                                strong: true
-                                color: piece.tone
-                                font.pixelSize: Tokens.smallSize
-                                text: step.index + 1
-                            }
-                        }
-
-                        Column {
-                            id: words
-                            x: 40
-                            width: parent.width - x
-                            topPadding: 4
-                            spacing: 2
-
-                            Ink {
-                                width: parent.width
-                                wrapMode: Text.WordWrap
-                                text: step.modelData.titulo
-                            }
-
-                            Ink {
-                                width: parent.width
-                                dim: true
-                                wrapMode: Text.WordWrap
-                                font.pixelSize: Tokens.smallSize
-                                text: step.modelData.detalle
-                                visible: text !== ""
-                            }
-                        }
-                    }
-                }
+            Steps {
+                block: piece
+                host: root
             }
         }
 
         Component {
             id: timeline
 
-            Column {
-                width: piece.width
-
-                Repeater {
-                    model: piece.modelData.items
-
-                    Item {
-                        id: moment
-
-                        required property var modelData
-                        required property int index
-                        readonly property bool last: index === piece.modelData.items.length - 1
-
-                        width: piece.width
-                        implicitHeight: words.implicitHeight + (last ? 0 : 14)
-
-                        Rectangle {
-                            x: 5
-                            y: 6
-                            width: 2
-                            height: parent.height
-                            color: Tokens.border
-                            visible: !moment.last
-                        }
-
-                        Rectangle {
-                            y: 4
-                            width: 12
-                            height: 12
-                            radius: 6
-                            color: moment.last ? piece.tone : Tokens.plate
-                            border.color: piece.tone
-                            border.width: 2
-                        }
-
-                        Column {
-                            id: words
-                            x: 26
-                            width: parent.width - x
-                            spacing: 2
-
-                            Ink {
-                                strong: true
-                                color: piece.tone
-                                font.pixelSize: Tokens.smallSize
-                                text: moment.modelData.valor
-                                visible: text !== ""
-                            }
-
-                            Ink {
-                                width: parent.width
-                                wrapMode: Text.WordWrap
-                                text: moment.modelData.titulo
-                            }
-
-                            Ink {
-                                width: parent.width
-                                dim: true
-                                wrapMode: Text.WordWrap
-                                font.pixelSize: Tokens.smallSize
-                                text: moment.modelData.detalle
-                                visible: text !== ""
-                            }
-                        }
-                    }
-                }
+            Chronicle {
+                block: piece
+                host: root
             }
         }
 
         Component {
             id: rating
 
-            Row {
-                spacing: 14
-
-                Ink {
-                    anchors.verticalCenter: parent.verticalCenter
-                    strong: true
-                    font.pixelSize: 32
-                    color: piece.tone
-                    text: Number(piece.modelData.valor).toLocaleString(Qt.locale(), "f", 1)
-                }
-
-                Column {
-                    anchors.verticalCenter: parent.verticalCenter
-                    spacing: 2
-
-                    Row {
-                        spacing: 3
-
-                        Repeater {
-                            model: 5
-
-                            Item {
-                                id: star
-
-                                required property int index
-
-                                width: 20
-                                height: 22
-
-                                Text {
-                                    text: "★"
-                                    color: Tokens.border
-                                    font.pixelSize: 20
-                                }
-
-                                Item {
-                                    width: star.width * Math.max(0, Math.min(1, piece.modelData.valor - star.index))
-                                    height: star.height
-                                    clip: true
-
-                                    Text {
-                                        text: "★"
-                                        color: piece.tone
-                                        font.pixelSize: 20
-                                    }
-                                }
-                            }
-                        }
-                    }
-
-                    Ink {
-                        dim: true
-                        font.pixelSize: Tokens.smallSize
-                        text: piece.modelData.texto
-                        visible: text !== ""
-                    }
-                }
+            Rating {
+                block: piece
+                host: root
             }
         }
 
         Component {
             id: quote
 
-            Item {
-                width: piece.width
-                implicitHeight: words.implicitHeight + 8
-
-                Ink {
-                    y: -14
-                    strong: true
-                    font.pixelSize: 76
-                    color: root.soft(piece.tone, 0.45)
-                    text: "“"
-                }
-
-                Column {
-                    id: words
-                    x: 42
-                    y: 8
-                    width: parent.width - x
-                    spacing: 6
-
-                    Ink {
-                        width: parent.width
-                        wrapMode: Text.WordWrap
-                        lineHeight: 1.2
-                        font.italic: true
-                        font.pixelSize: Tokens.clockSize
-                        text: "«" + piece.modelData.texto + "»"
-                    }
-
-                    Ink {
-                        dim: true
-                        font.pixelSize: Tokens.smallSize
-                        text: "— " + piece.modelData.valor
-                        visible: piece.modelData.valor !== ""
-                    }
-                }
+            Quote {
+                block: piece
+                host: root
             }
         }
 
         Component {
             id: code
 
-            Rectangle {
-                width: piece.width
-                implicitHeight: listing.y + listing.implicitHeight + 14
-                radius: Tokens.radius
-                color: Tokens.surface
-
-                Ink {
-                    id: language
-                    x: 14
-                    y: 10
-                    dim: true
-                    strong: true
-                    font.pixelSize: Tokens.tinySize
-                    text: piece.modelData.valor
-                    visible: text !== ""
-                }
-
-                Text {
-                    id: listing
-                    x: 14
-                    y: language.visible ? 30 : 14
-                    width: parent.width - 28
-                    wrapMode: Text.WrapAnywhere
-                    textFormat: Text.PlainText
-                    font.family: "JetBrains Mono"
-                    font.pixelSize: 12
-                    color: Tokens.text
-                    text: piece.modelData.texto
-                }
+            Snippet {
+                block: piece
+                host: root
             }
         }
 
         Component {
             id: gallery
 
-            Row {
-                id: shelf
-                width: piece.width
-                spacing: 8
-
-                Repeater {
-                    model: piece.modelData.items
-
-                    Item {
-                        id: shot
-
-                        required property var modelData
-
-                        width: (shelf.width - shelf.spacing * (piece.modelData.items.length - 1)) / piece.modelData.items.length
-                        height: 120
-
-                        Clip {
-                            anchors.fill: parent
-                            radius: Tokens.radius
-                            color: Tokens.surface
-
-                            Image {
-                                anchors.fill: parent
-                                source: shot.modelData.imagen
-                                sourceSize.width: width * 2
-                                fillMode: Image.PreserveAspectCrop
-                                asynchronous: true
-                            }
-                        }
-
-                        MouseArea {
-                            anchors.fill: parent
-                            enabled: shot.modelData.url !== ""
-                            cursorShape: Qt.PointingHandCursor
-                            onClicked: {
-                                Qt.openUrlExternally(shot.modelData.url);
-                                root.done();
-                            }
-                        }
-                    }
-                }
+            Shelf {
+                block: piece
+                host: root
             }
         }
 
         Component {
             id: tags
 
-            Flow {
-                width: piece.width
-                spacing: 8
-
-                Repeater {
-                    model: piece.modelData.items
-
-                    Rectangle {
-                        id: chip
-
-                        required property var modelData
-                        readonly property color tone: root.tint(modelData.color, piece.tone)
-
-                        width: chipRow.implicitWidth + 22
-                        height: 28
-                        radius: height / 2
-                        color: root.soft(tone, 0.16)
-                        border.color: root.soft(tone, 0.35)
-                        border.width: 1
-
-                        Row {
-                            id: chipRow
-                            anchors.centerIn: parent
-                            spacing: 5
-
-                            Icon {
-                                anchors.verticalCenter: parent.verticalCenter
-                                name: chip.modelData.icono
-                                color: chip.tone
-                                font.pixelSize: 15
-                                visible: name !== ""
-                            }
-
-                            Ink {
-                                anchors.verticalCenter: parent.verticalCenter
-                                font.pixelSize: Tokens.smallSize
-                                color: chip.tone
-                                strong: true
-                                text: chip.modelData.titulo
-                            }
-                        }
-                    }
-                }
+            Tags {
+                block: piece
+                host: root
             }
         }
 
         Component {
             id: photo
 
-            Column {
-                width: piece.width
-                spacing: 6
-
-                Picture {
-                    id: shot
-                    width: parent.width
-                    tall: 220
-                    source: piece.modelData.url
-                }
-
-                Ink {
-                    width: parent.width
-                    dim: true
-                    font.pixelSize: Tokens.smallSize
-                    wrapMode: Text.WordWrap
-                    text: piece.modelData.texto
-                    visible: shot.ready && text !== ""
-                }
+            Photo {
+                block: piece
+                host: root
             }
         }
 
         Component {
             id: actions
 
-            Flow {
-                width: piece.width
-                spacing: 8
-
-                Repeater {
-                    model: piece.modelData.items
-
-                    Pill {
-                        required property var modelData
-                        required property int index
-                        text: modelData.titulo
-                        icon: "lightning"
-                        solid: index === 0
-                        onPressed: {
-                            Daemon.say(modelData.orden, "card", false);
-                            root.done();
-                        }
-                    }
-                }
+            Actions {
+                block: piece
+                host: root
             }
         }
 
@@ -1671,41 +402,9 @@ Item {
         Component {
             id: links
 
-            Flow {
-                width: piece.width
-                spacing: 14
-
-                Ink {
-                    dim: true
-                    font.pixelSize: Tokens.tinySize + 1
-                    text: "Fuentes"
-                }
-
-                Repeater {
-                    model: piece.modelData.items
-
-                    Ink {
-                        required property var modelData
-
-                        width: Math.min(implicitWidth, 260)
-                        elide: Text.ElideRight
-                        font.pixelSize: Tokens.tinySize + 1
-                        font.underline: true
-                        color: source.containsMouse ? Tokens.text : Tokens.dim
-                        text: modelData.titulo || modelData.url.replace(/^https?:\/\/(www\.)?/, "").split("/")[0]
-
-                        MouseArea {
-                            id: source
-                            anchors.fill: parent
-                            hoverEnabled: true
-                            cursorShape: Qt.PointingHandCursor
-                            onClicked: {
-                                Qt.openUrlExternally(parent.modelData.url);
-                                root.done();
-                            }
-                        }
-                    }
-                }
+            Sources {
+                block: piece
+                host: root
             }
         }
 
@@ -1714,143 +413,9 @@ Item {
         Component {
             id: forecast
 
-            Column {
-                id: sky
-
-                readonly property var days: piece.modelData.items
-                readonly property real low: Math.min.apply(null, days.map(d => d.min))
-                readonly property real high: Math.max.apply(null, days.map(d => d.max))
-
-                width: piece.width
-                spacing: 2
-
-                Item {
-                    width: parent.width
-                    implicitHeight: now.implicitHeight + 10
-                    visible: piece.modelData.valor !== ""
-
-                    Row {
-                        id: now
-                        spacing: 14
-
-                        Icon {
-                            anchors.verticalCenter: parent.verticalCenter
-                            name: piece.modelData.icono || (sky.days[0]?.icono ?? "")
-                            color: piece.tone
-                            font.pixelSize: 46
-                            visible: name !== ""
-                        }
-
-                        Ink {
-                            anchors.verticalCenter: parent.verticalCenter
-                            font.pixelSize: 56
-                            font.weight: Font.Light
-                            font.variableAxes: ({ "wght": 300 })
-                            text: piece.modelData.valor
-                        }
-
-                        Ink {
-                            anchors.verticalCenter: parent.verticalCenter
-                            width: Math.max(0, Math.min(implicitWidth, sky.width - 220))
-                            dim: true
-                            wrapMode: Text.WordWrap
-                            maximumLineCount: 2
-                            elide: Text.ElideRight
-                            text: piece.modelData.texto
-                        }
-                    }
-                }
-
-                Repeater {
-                    model: sky.days
-
-                    Item {
-                        id: day
-
-                        required property var modelData
-                        required property int index
-
-                        width: sky.width
-                        height: 34
-
-                        Rectangle {
-                            width: parent.width
-                            height: 1
-                            color: Tokens.border
-                            visible: day.index > 0
-                        }
-
-                        Ink {
-                            id: dayName
-                            width: 64
-                            anchors.verticalCenter: parent.verticalCenter
-                            elide: Text.ElideRight
-                            strong: day.index === 0
-                            text: day.modelData.titulo
-                        }
-
-                        Icon {
-                            id: weather
-                            x: dayName.width + 4
-                            anchors.verticalCenter: parent.verticalCenter
-                            name: day.modelData.icono
-                            color: piece.tone
-                        }
-
-                        Ink {
-                            id: rain
-                            x: weather.x + 28
-                            width: 42
-                            anchors.verticalCenter: parent.verticalCenter
-                            font.pixelSize: Tokens.tinySize
-                            strong: true
-                            color: Tokens.focus
-                            elide: Text.ElideRight
-                            text: day.modelData.detalle
-                        }
-
-                        Ink {
-                            id: cold
-                            x: rain.x + rain.width
-                            width: 38
-                            anchors.verticalCenter: parent.verticalCenter
-                            horizontalAlignment: Text.AlignRight
-                            dim: true
-                            text: Math.round(day.modelData.min) + "°"
-                        }
-
-                        Rectangle {
-                            id: track
-
-                            readonly property real range: Math.max(1e-9, sky.high - sky.low)
-
-                            x: cold.x + cold.width + 12
-                            width: warm.x - x - 12
-                            height: 6
-                            radius: 3
-                            anchors.verticalCenter: parent.verticalCenter
-                            color: Tokens.surface
-
-                            Rectangle {
-                                x: track.width * (day.modelData.min - sky.low) / track.range
-                                width: Math.max(track.height, track.width * (day.modelData.max - day.modelData.min) / track.range)
-                                height: track.height
-                                radius: track.radius
-                                color: piece.tone
-                            }
-                        }
-
-                        Ink {
-                            id: warm
-                            anchors.right: parent.right
-                            width: 38
-                            anchors.verticalCenter: parent.verticalCenter
-                            horizontalAlignment: Text.AlignRight
-                            strong: true
-                            text: Math.round(day.modelData.max) + "°"
-                        }
-                    }
-                }
+            Forecast {
+                block: piece
+                host: root
             }
         }
 
@@ -1859,127 +424,9 @@ Item {
         Component {
             id: score
 
-            Rectangle {
-                id: board
-
-                readonly property var sides: piece.modelData.items
-                readonly property var goals: sides.map(side => parseFloat(String(side.valor).replace(",", ".")))
-                readonly property int leader: goals[0] > goals[1] ? 0 : goals[1] > goals[0] ? 1 : -1
-
-                width: piece.width
-                implicitHeight: 168
-                radius: Tokens.radius
-                color: Tokens.surface
-
-                Ink {
-                    id: phase
-                    anchors.horizontalCenter: parent.horizontalCenter
-                    y: 14
-                    strong: true
-                    font.pixelSize: Tokens.smallSize
-                    color: piece.tone
-                    text: piece.modelData.texto
-                    visible: text !== ""
-                }
-
-                Repeater {
-                    model: board.sides
-
-                    Column {
-                        id: side
-
-                        required property var modelData
-                        required property int index
-
-                        x: index === 0 ? 14 : board.width - width - 14
-                        y: 40
-                        width: (board.width - 150) / 2
-                        spacing: 8
-
-                        Item {
-                            anchors.horizontalCenter: parent.horizontalCenter
-                            width: 56
-                            height: 56
-
-                            Rectangle {
-                                anchors.fill: parent
-                                radius: width / 2
-                                color: root.soft(piece.tone, 0.16)
-                                border.color: root.soft(piece.tone, 0.45)
-                                border.width: 1
-                                visible: !crest.ready
-
-                                Ink {
-                                    anchors.centerIn: parent
-                                    strong: true
-                                    font.pixelSize: 22
-                                    color: piece.tone
-                                    text: side.modelData.titulo.charAt(0).toUpperCase()
-                                }
-                            }
-
-                            Image {
-                                id: crest
-
-                                readonly property bool ready: status === Image.Ready
-
-                                anchors.fill: parent
-                                source: side.modelData.imagen
-                                sourceSize.width: 112
-                                fillMode: Image.PreserveAspectFit
-                                asynchronous: true
-                                visible: ready
-                            }
-                        }
-
-                        Ink {
-                            width: parent.width
-                            horizontalAlignment: Text.AlignHCenter
-                            wrapMode: Text.WordWrap
-                            maximumLineCount: 2
-                            elide: Text.ElideRight
-                            strong: board.leader === side.index
-                            text: side.modelData.titulo
-                        }
-
-                        Ink {
-                            width: parent.width
-                            horizontalAlignment: Text.AlignHCenter
-                            dim: true
-                            font.pixelSize: Tokens.tinySize
-                            elide: Text.ElideRight
-                            text: side.modelData.detalle
-                            visible: text !== ""
-                        }
-                    }
-                }
-
-                Row {
-                    anchors.horizontalCenter: parent.horizontalCenter
-                    y: 52
-                    spacing: 12
-
-                    Ink {
-                        strong: true
-                        font.pixelSize: 46
-                        color: board.leader === 1 ? Tokens.dim : Tokens.text
-                        text: board.sides[0].valor
-                    }
-
-                    Ink {
-                        anchors.verticalCenter: parent.verticalCenter
-                        dim: true
-                        font.pixelSize: 28
-                        text: "–"
-                    }
-
-                    Ink {
-                        strong: true
-                        font.pixelSize: 46
-                        color: board.leader === 0 ? Tokens.dim : Tokens.text
-                        text: board.sides[1].valor
-                    }
-                }
+            Scoreboard {
+                block: piece
+                host: root
             }
         }
 
@@ -1988,161 +435,9 @@ Item {
         Component {
             id: duel
 
-            Column {
-                id: arena
-
-                readonly property var names: piece.modelData.columnas
-                readonly property var pictures: piece.modelData.imagenes ?? ["", ""]
-                readonly property var tones: [piece.tone, Tokens.text]
-                readonly property real edge: 104
-
-                width: piece.width
-                spacing: 12
-
-                Item {
-                    width: parent.width
-                    height: 52
-
-                    Repeater {
-                        model: 2
-
-                        Row {
-                            id: contender
-
-                            required property int index
-
-                            x: index === 0 ? 0 : arena.width - width
-                            anchors.verticalCenter: parent.verticalCenter
-                            layoutDirection: index === 0 ? Qt.LeftToRight : Qt.RightToLeft
-                            spacing: 10
-
-                            Item {
-                                width: 44
-                                height: 44
-                                anchors.verticalCenter: parent.verticalCenter
-
-                                Rectangle {
-                                    anchors.fill: parent
-                                    radius: width / 2
-                                    color: root.soft(arena.tones[contender.index], 0.2)
-                                    border.color: arena.tones[contender.index]
-                                    border.width: 1.5
-
-                                    Ink {
-                                        anchors.centerIn: parent
-                                        strong: true
-                                        color: arena.tones[contender.index]
-                                        text: arena.names[contender.index].charAt(0).toUpperCase()
-                                        visible: !face.ready
-                                    }
-                                }
-
-                                Picture {
-                                    id: face
-                                    anchors.fill: parent
-                                    tall: 44
-                                    radius: 22
-                                    source: arena.pictures[contender.index] ?? ""
-                                }
-                            }
-
-                            Ink {
-                                anchors.verticalCenter: parent.verticalCenter
-                                width: Math.min(implicitWidth, arena.width / 2 - 80)
-                                strong: true
-                                elide: Text.ElideRight
-                                color: arena.tones[contender.index]
-                                text: arena.names[contender.index]
-                            }
-                        }
-                    }
-
-                    Ink {
-                        anchors.centerIn: parent
-                        dim: true
-                        strong: true
-                        font.pixelSize: Tokens.smallSize
-                        text: "vs"
-                    }
-                }
-
-                Repeater {
-                    model: piece.modelData.items
-
-                    Column {
-                        id: bout
-
-                        required property var modelData
-                        readonly property var numbers: modelData.numeros ?? []
-                        readonly property real most: numbers.length === 2 ? Math.max(Math.abs(numbers[0]), Math.abs(numbers[1]), 1e-9) : 1
-                        // Sin decir quién gana, gana el mayor.
-                        readonly property int best: modelData.mejor >= 0 ? modelData.mejor : numbers.length === 2 && numbers[0] !== numbers[1] ? (numbers[0] > numbers[1] ? 0 : 1) : -1
-                        property real grow: 0
-                        NumberAnimation on grow { to: 1; duration: 800; easing.type: Easing.OutCubic }
-
-                        width: arena.width
-                        spacing: 4
-
-                        Ink {
-                            anchors.horizontalCenter: parent.horizontalCenter
-                            dim: true
-                            font.pixelSize: Tokens.smallSize
-                            text: bout.modelData.titulo
-                        }
-
-                        Item {
-                            width: parent.width
-                            height: Math.max(22, before.implicitHeight)
-
-                            Ink {
-                                id: before
-                                width: arena.edge
-                                anchors.verticalCenter: parent.verticalCenter
-                                wrapMode: Text.WordWrap
-                                maximumLineCount: 2
-                                elide: Text.ElideRight
-                                strong: bout.best === 0
-                                color: bout.best === 0 ? arena.tones[0] : Tokens.text
-                                text: bout.modelData.valores[0]
-                            }
-
-                            Rectangle {
-                                anchors.right: parent.horizontalCenter
-                                anchors.rightMargin: 2
-                                anchors.verticalCenter: parent.verticalCenter
-                                width: (parent.width / 2 - arena.edge - 10) * Math.abs(bout.numbers[0] ?? 0) / bout.most * bout.grow
-                                height: 8
-                                radius: 4
-                                color: bout.best === 1 ? root.soft(arena.tones[0], 0.35) : arena.tones[0]
-                                visible: bout.numbers.length === 2
-                            }
-
-                            Rectangle {
-                                anchors.left: parent.horizontalCenter
-                                anchors.leftMargin: 2
-                                anchors.verticalCenter: parent.verticalCenter
-                                width: (parent.width / 2 - arena.edge - 10) * Math.abs(bout.numbers[1] ?? 0) / bout.most * bout.grow
-                                height: 8
-                                radius: 4
-                                color: bout.best === 0 ? root.soft(arena.tones[1], 0.35) : arena.tones[1]
-                                visible: bout.numbers.length === 2
-                            }
-
-                            Ink {
-                                anchors.right: parent.right
-                                width: arena.edge
-                                anchors.verticalCenter: parent.verticalCenter
-                                horizontalAlignment: Text.AlignRight
-                                wrapMode: Text.WordWrap
-                                maximumLineCount: 2
-                                elide: Text.ElideRight
-                                strong: bout.best === 1
-                                color: bout.best === 1 ? arena.tones[1] : Tokens.text
-                                text: bout.modelData.valores[1]
-                            }
-                        }
-                    }
-                }
+            Duel {
+                block: piece
+                host: root
             }
         }
 
@@ -2150,103 +445,9 @@ Item {
         Component {
             id: gauges
 
-            Row {
-                id: dials
-
-                readonly property int count: piece.modelData.items.length
-                readonly property real each: (width - spacing * (count - 1)) / count
-                readonly property real size: Math.min(count === 1 ? 150 : 124, each)
-
-                width: piece.width
-                spacing: 12
-
-                Repeater {
-                    model: piece.modelData.items
-
-                    Column {
-                        id: dial
-
-                        required property var modelData
-                        required property int index
-                        readonly property color tone: root.tint(modelData.color, piece.tone)
-                        readonly property real share: Math.max(0, Math.min(1, modelData.numero / modelData.maximo))
-                        property real shown: 0
-                        NumberAnimation on shown { to: dial.share; duration: 1000; easing.type: Easing.OutCubic }
-
-                        width: dials.each
-                        spacing: 6
-
-                        Item {
-                            anchors.horizontalCenter: parent.horizontalCenter
-                            width: dials.size
-                            height: dials.size
-
-                            Canvas {
-                                id: arc
-                                anchors.fill: parent
-                                onPaint: {
-                                    const ctx = getContext("2d");
-                                    ctx.reset();
-                                    const r = width / 2, line = Math.max(8, width * 0.1), from = Math.PI * 0.75, sweep = Math.PI * 1.5;
-                                    const t = dial.tone;
-                                    ctx.lineCap = "round";
-                                    ctx.lineWidth = line;
-                                    ctx.beginPath();
-                                    ctx.arc(r, r, r - line / 2 - 1, from, from + sweep);
-                                    ctx.strokeStyle = Qt.rgba(t.r, t.g, t.b, 0.16);
-                                    ctx.stroke();
-                                    if (dial.shown <= 0)
-                                        return;
-                                    ctx.beginPath();
-                                    ctx.arc(r, r, r - line / 2 - 1, from, from + sweep * dial.shown);
-                                    ctx.strokeStyle = t;
-                                    ctx.stroke();
-                                }
-
-                                Connections {
-                                    target: dial
-                                    function onShownChanged(): void {
-                                        arc.requestPaint();
-                                    }
-                                }
-                            }
-
-                            Column {
-                                anchors.centerIn: parent
-                                width: parent.width * 0.7
-
-                                Ink {
-                                    width: parent.width
-                                    horizontalAlignment: Text.AlignHCenter
-                                    strong: true
-                                    font.pixelSize: Math.round(dials.size * (text.length > 5 ? 0.17 : 0.23))
-                                    elide: Text.ElideRight
-                                    text: dial.modelData.valor || (dial.modelData.maximo === 100 ? Math.round(dial.modelData.numero) + " %" : root.figure(dial.modelData.numero, ""))
-                                }
-
-                                Ink {
-                                    width: parent.width
-                                    horizontalAlignment: Text.AlignHCenter
-                                    dim: true
-                                    font.pixelSize: Tokens.tinySize
-                                    text: dial.modelData.maximo !== 100 && dial.modelData.maximo !== 1 ? "de " + root.figure(dial.modelData.maximo, "") : ""
-                                    visible: text !== ""
-                                }
-                            }
-                        }
-
-                        Ink {
-                            width: parent.width
-                            horizontalAlignment: Text.AlignHCenter
-                            wrapMode: Text.WordWrap
-                            maximumLineCount: 2
-                            elide: Text.ElideRight
-                            font.pixelSize: Tokens.smallSize
-                            text: dial.modelData.titulo
-                            visible: text !== ""
-                        }
-                    }
-                }
+            Gauges {
+                block: piece
+                host: root
             }
         }
 
@@ -2254,69 +455,9 @@ Item {
         Component {
             id: progress
 
-            Column {
-                width: piece.width
-                spacing: 12
-
-                Repeater {
-                    model: piece.modelData.items
-
-                    Column {
-                        id: lane
-
-                        required property var modelData
-                        required property int index
-                        readonly property color tone: root.tint(modelData.color, piece.tone)
-                        readonly property real share: Math.max(0, Math.min(1, modelData.numero / modelData.maximo))
-                        property real grow: 0
-                        NumberAnimation on grow { to: 1; duration: 800; easing.type: Easing.OutCubic }
-
-                        width: piece.width
-                        spacing: 6
-
-                        Item {
-                            width: parent.width
-                            implicitHeight: label.implicitHeight
-
-                            Rectangle {
-                                anchors.verticalCenter: parent.verticalCenter
-                                width: 8
-                                height: 8
-                                radius: 4
-                                color: lane.tone
-                            }
-
-                            Ink {
-                                id: label
-                                x: 16
-                                width: parent.width - x - amount.width - 10
-                                elide: Text.ElideRight
-                                text: lane.modelData.titulo
-                            }
-
-                            Ink {
-                                id: amount
-                                anchors.right: parent.right
-                                strong: true
-                                text: lane.modelData.valor || (lane.modelData.maximo === 100 ? Math.round(lane.modelData.numero) + " %" : root.figure(lane.modelData.numero, ""))
-                            }
-                        }
-
-                        Rectangle {
-                            width: parent.width
-                            height: 8
-                            radius: 4
-                            color: root.soft(lane.tone, 0.14)
-
-                            Rectangle {
-                                width: Math.max(height, parent.width * lane.share * lane.grow)
-                                height: parent.height
-                                radius: parent.radius
-                                color: lane.tone
-                            }
-                        }
-                    }
-                }
+            Progress {
+                block: piece
+                host: root
             }
         }
 
@@ -2324,123 +465,9 @@ Item {
         Component {
             id: checks
 
-            Column {
-                id: sheet
-
-                property int ticked: 0
-
-                width: piece.width
-                spacing: 2
-
-                Ink {
-                    anchors.right: parent.right
-                    dim: true
-                    font.pixelSize: Tokens.tinySize
-                    text: `${sheet.ticked} de ${piece.modelData.items.length}`
-                }
-
-                Repeater {
-                    model: piece.modelData.items
-
-                    Rectangle {
-                        id: entry
-
-                        required property var modelData
-                        property bool done: false
-                        onDoneChanged: {
-                            sheet.ticked += done ? 1 : -1;
-                            tick.requestPaint();
-                        }
-
-                        width: sheet.width
-                        height: Math.max(36, words.implicitHeight + 14)
-                        radius: Tokens.radius
-                        color: tap.containsMouse ? Tokens.surface : "transparent"
-
-                        Behavior on color {
-                            ColorAnimation { duration: Tokens.fast }
-                        }
-
-                        Rectangle {
-                            id: box
-                            x: 8
-                            anchors.verticalCenter: parent.verticalCenter
-                            width: 20
-                            height: 20
-                            radius: 10
-                            color: entry.done ? piece.tone : "transparent"
-                            border.color: entry.done ? piece.tone : root.soft(Tokens.text, 0.3)
-                            border.width: 1.5
-
-                            Behavior on color {
-                                ColorAnimation { duration: Tokens.fast }
-                            }
-
-                            Canvas {
-                                id: tick
-                                anchors.fill: parent
-                                onPaint: {
-                                    const ctx = getContext("2d");
-                                    ctx.reset();
-                                    if (!entry.done)
-                                        return;
-                                    ctx.strokeStyle = Tokens.bg;
-                                    ctx.lineWidth = 2.2;
-                                    ctx.lineCap = "round";
-                                    ctx.lineJoin = "round";
-                                    ctx.beginPath();
-                                    ctx.moveTo(5.5, 10.5);
-                                    ctx.lineTo(8.8, 13.8);
-                                    ctx.lineTo(14.8, 6.8);
-                                    ctx.stroke();
-                                }
-                            }
-                        }
-
-                        Column {
-                            id: words
-                            x: box.x + box.width + 12
-                            width: parent.width - x - quantity.width - 18
-                            anchors.verticalCenter: parent.verticalCenter
-                            spacing: 1
-
-                            Ink {
-                                width: parent.width
-                                wrapMode: Text.WordWrap
-                                font.strikeout: entry.done
-                                color: entry.done ? Tokens.dim : Tokens.text
-                                text: entry.modelData.titulo
-                            }
-
-                            Ink {
-                                width: parent.width
-                                dim: true
-                                font.pixelSize: Tokens.smallSize
-                                wrapMode: Text.WordWrap
-                                text: entry.modelData.detalle
-                                visible: text !== ""
-                            }
-                        }
-
-                        Ink {
-                            id: quantity
-                            anchors.right: parent.right
-                            anchors.rightMargin: 10
-                            anchors.verticalCenter: parent.verticalCenter
-                            strong: true
-                            color: entry.done ? Tokens.dim : piece.tone
-                            text: entry.modelData.valor
-                        }
-
-                        MouseArea {
-                            id: tap
-                            anchors.fill: parent
-                            hoverEnabled: true
-                            cursorShape: Qt.PointingHandCursor
-                            onClicked: entry.done = !entry.done
-                        }
-                    }
-                }
+            Checklist {
+                block: piece
+                host: root
             }
         }
 
@@ -2449,83 +476,9 @@ Item {
         Component {
             id: definition
 
-            Column {
-                id: entry
-
-                // Si el título de la tarjeta ya es la palabra, no se repite: solo su categoría.
-                readonly property bool said: (root.card?.titulo ?? "").toLowerCase().indexOf(piece.modelData.texto.toLowerCase()) >= 0
-
-                width: piece.width
-                spacing: 12
-
-                Column {
-                    width: parent.width
-                    spacing: 2
-                    visible: !entry.said || piece.modelData.valor !== ""
-
-                    Ink {
-                        width: parent.width
-                        wrapMode: Text.WordWrap
-                        font.pixelSize: 32
-                        font.weight: Font.DemiBold
-                        font.variableAxes: ({ "wght": 650 })
-                        text: piece.modelData.texto
-                        visible: !entry.said
-                    }
-
-                    Ink {
-                        width: parent.width
-                        wrapMode: Text.WordWrap
-                        font.italic: true
-                        color: piece.tone
-                        text: piece.modelData.valor
-                        visible: text !== ""
-                    }
-                }
-
-                Repeater {
-                    model: piece.modelData.items
-
-                    Item {
-                        id: sense
-
-                        required property var modelData
-                        required property int index
-
-                        width: piece.width
-                        implicitHeight: meaning.implicitHeight
-
-                        Ink {
-                            strong: true
-                            color: piece.tone
-                            text: sense.index + 1
-                        }
-
-                        Column {
-                            id: meaning
-                            x: 24
-                            width: parent.width - x
-                            spacing: 3
-
-                            Ink {
-                                width: parent.width
-                                wrapMode: Text.WordWrap
-                                lineHeight: 1.15
-                                text: sense.modelData.titulo
-                            }
-
-                            Ink {
-                                width: parent.width
-                                wrapMode: Text.WordWrap
-                                dim: true
-                                font.italic: true
-                                font.pixelSize: Tokens.smallSize
-                                text: "«" + sense.modelData.detalle + "»"
-                                visible: sense.modelData.detalle !== ""
-                            }
-                        }
-                    }
-                }
+            Definition {
+                block: piece
+                host: root
             }
         }
 
@@ -2533,46 +486,9 @@ Item {
         Component {
             id: callout
 
-            Rectangle {
-                width: piece.width
-                implicitHeight: Math.max(52, words.implicitHeight + 26)
-                radius: Tokens.radius
-                color: root.mix(Tokens.bg, piece.tone, 0.12)
-                border.color: root.soft(piece.tone, 0.35)
-                border.width: 1
-
-                Icon {
-                    id: mark
-                    x: 14
-                    y: 14
-                    color: piece.tone
-                    font.pixelSize: 22
-                    name: piece.modelData.icono || ({ aviso: "warning", mal: "x-circle", bien: "check-circle" })[piece.modelData.color] || "lightbulb"
-                }
-
-                Column {
-                    id: words
-                    x: 48
-                    y: 13
-                    width: parent.width - x - 16
-                    spacing: 3
-
-                    Ink {
-                        width: parent.width
-                        strong: true
-                        color: piece.tone
-                        wrapMode: Text.WordWrap
-                        text: piece.modelData.valor
-                        visible: text !== ""
-                    }
-
-                    Ink {
-                        width: parent.width
-                        wrapMode: Text.WordWrap
-                        lineHeight: 1.15
-                        text: piece.modelData.texto
-                    }
-                }
+            Callout {
+                block: piece
+                host: root
             }
         }
 
@@ -2580,84 +496,9 @@ Item {
         Component {
             id: palette
 
-            Row {
-                id: swatches
-
-                readonly property int count: piece.modelData.items.length
-
-                width: piece.width
-                spacing: 8
-
-                Repeater {
-                    model: piece.modelData.items
-
-                    Column {
-                        id: swatch
-
-                        required property var modelData
-                        readonly property color paint: modelData.valor
-                        readonly property bool light: 0.299 * paint.r + 0.587 * paint.g + 0.114 * paint.b > 0.6
-                        property bool copied: false
-
-                        width: (swatches.width - swatches.spacing * (swatches.count - 1)) / swatches.count
-                        spacing: 6
-
-                        Rectangle {
-                            width: parent.width
-                            height: 76
-                            radius: Tokens.radius
-                            color: swatch.paint
-                            border.color: root.soft(Tokens.text, 0.12)
-                            border.width: 1
-
-                            Ink {
-                                anchors.centerIn: parent
-                                font.pixelSize: Tokens.smallSize
-                                strong: true
-                                color: swatch.light ? "#111111" : "#ffffff"
-                                text: "Copiado"
-                                opacity: swatch.copied ? 1 : 0
-
-                                Behavior on opacity {
-                                    NumberAnimation { duration: Tokens.fast }
-                                }
-                            }
-
-                            Timer {
-                                running: swatch.copied
-                                interval: 1200
-                                onTriggered: swatch.copied = false
-                            }
-
-                            MouseArea {
-                                anchors.fill: parent
-                                cursorShape: Qt.PointingHandCursor
-                                onClicked: {
-                                    Quickshell.clipboardText = swatch.modelData.valor;
-                                    swatch.copied = true;
-                                }
-                            }
-                        }
-
-                        Text {
-                            width: parent.width
-                            horizontalAlignment: Text.AlignHCenter
-                            font.family: "JetBrains Mono"
-                            font.pixelSize: 11
-                            color: Tokens.dim
-                            text: swatch.modelData.valor
-                        }
-
-                        Ink {
-                            width: parent.width
-                            horizontalAlignment: Text.AlignHCenter
-                            elide: Text.ElideRight
-                            font.pixelSize: Tokens.smallSize
-                            text: swatch.modelData.titulo
-                            visible: text !== ""
-                        }
-                    }
-                }
+            Swatches {
+                block: piece
+                host: root
             }
         }
 
@@ -2666,67 +507,9 @@ Item {
         Component {
             id: asks
 
-            Column {
-                width: piece.width
-                spacing: 0
-
-                Repeater {
-                    model: piece.modelData.items
-
-                    Rectangle {
-                        id: ask
-
-                        required property var modelData
-
-                        width: piece.width
-                        height: 34
-                        radius: Tokens.radius
-                        color: press.containsMouse ? Tokens.surface : "transparent"
-
-                        Behavior on color {
-                            ColorAnimation { duration: Tokens.fast }
-                        }
-
-                        Icon {
-                            id: mark
-                            x: 8
-                            anchors.verticalCenter: parent.verticalCenter
-                            name: "arrow-bend-down-right"
-                            color: press.containsMouse ? root.tone : root.soft(Tokens.dim, 0.6)
-                            font.pixelSize: Tokens.smallSize + 2
-                        }
-
-                        Ink {
-                            x: mark.x + mark.width + 10
-                            width: parent.width - x - 36
-                            anchors.verticalCenter: parent.verticalCenter
-                            elide: Text.ElideRight
-                            color: press.containsMouse ? Tokens.text : Tokens.dim
-                            text: ask.modelData.titulo
-                        }
-
-                        Icon {
-                            anchors.right: parent.right
-                            anchors.rightMargin: 10
-                            anchors.verticalCenter: parent.verticalCenter
-                            name: "arrow-up"
-                            color: root.tone
-                            opacity: press.containsMouse ? 1 : 0
-
-                            Behavior on opacity {
-                                NumberAnimation { duration: Tokens.fast }
-                            }
-                        }
-
-                        MouseArea {
-                            id: press
-                            anchors.fill: parent
-                            hoverEnabled: true
-                            cursorShape: Qt.PointingHandCursor
-                            onClicked: root.follow(ask.modelData.titulo)
-                        }
-                    }
-                }
+            Asks {
+                block: piece
+                host: root
             }
         }
     }
