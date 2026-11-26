@@ -1,15 +1,15 @@
 //! Qué agentes hay en marcha en esta máquina y en qué están.
 //!
 //! Mira los procesos cada segundo y reconoce los agentes conocidos (Claude
-//! Code, Codex, Gemini, opencode, pi, Aider…), los lancen desde una terminal,
-//! un editor o donde sea. Lo fino lo cuenta el propio agente cuando lo publica
-//! (Claude Code en ~/.claude/sessions, Codex en su rollout); si no, se
-//! deduce de cuánto trabaja su árbol de procesos. Si vive en un panel de
-//! herdr, manda lo que herdr ve en su pantalla (trabaja, espera, te
-//! necesita): es lo más fiable, porque Claude Code deja su estado sin
-//! actualizar en las sesiones que pasan a otro proceso. Y si te necesita, se
-//! lee de su pantalla qué te pregunta y con qué opciones, para contestar desde
-//! Veyl con una tecla (herdr o tmux).
+//! Code, Codex, Gemini, Antigravity, opencode, pi, Aider…), los lancen desde
+//! una terminal, un editor o donde sea. Lo fino lo cuenta el propio agente
+//! cuando lo publica (Claude Code en ~/.claude/sessions, Codex en su rollout,
+//! Antigravity en ~/.gemini/antigravity-cli); si no, se deduce de cuánto
+//! trabaja su árbol de procesos. Si vive en un panel de herdr, manda lo que
+//! herdr ve en su pantalla (trabaja, espera, te necesita): es lo más fiable,
+//! porque Claude Code deja su estado sin actualizar en las sesiones que pasan
+//! a otro proceso. Y si te necesita, se lee de su pantalla qué te pregunta y
+//! con qué opciones, para contestar desde Veyl con una tecla (herdr o tmux).
 
 use std::collections::{HashMap, HashSet};
 use std::fs::{self, File};
@@ -20,6 +20,7 @@ use std::sync::mpsc::Sender;
 use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
+use rusqlite::{Connection, OpenFlags};
 use serde::Serialize;
 use serde_json::Value;
 
@@ -34,10 +35,12 @@ const BUSY: f64 = 0.04;
 const CALM: f64 = 4.0;
 
 /// Nombre del programa → (proveedor, nombre visible).
-const KNOWN: [(&str, &str, &str); 13] = [
+const KNOWN: [(&str, &str, &str); 15] = [
     ("claude", "anthropic", "Claude"),
     ("codex", "openai", "Codex"),
     ("gemini", "google", "Gemini"),
+    ("agy", "google", "Antigravity"),
+    ("antigravity-cli", "google", "Antigravity"),
     ("opencode", "opencode", "opencode"),
     ("aider", "aider", "Aider"),
     ("cursor-agent", "cursor", "Cursor"),
@@ -138,9 +141,8 @@ fn clock_ticks() -> f64 {
     }
 }
 
-/// El agente conocido que es este proceso.
-fn program(pid: i32) -> Option<&'static (&'static str, &'static str, &'static str)> {
-    for arg in procs::argv(pid).iter().take(3) {
+fn program_of(args: &[String]) -> Option<&'static (&'static str, &'static str, &'static str)> {
+    for arg in args.iter().take(3) {
         // pi cambia el título de su proceso a «pi» relleno de espacios.
         let arg = arg.trim();
         let mut name = arg.rsplit('/').next().unwrap_or(arg).to_string();
@@ -157,6 +159,11 @@ fn program(pid: i32) -> Option<&'static (&'static str, &'static str, &'static st
         }
     }
     None
+}
+
+/// El agente conocido que es este proceso.
+fn program(pid: i32) -> Option<&'static (&'static str, &'static str, &'static str)> {
+    program_of(&procs::argv(pid))
 }
 
 /// El valor de `--model x` o `--model=x`.
@@ -665,6 +672,51 @@ fn rollout(entries: &[Value]) -> Told {
     out
 }
 
+/// Fase, modelo y herramienta en curso de una conversación de Antigravity.
+fn agy_transcript(entries: &[Value]) -> Told {
+    let mut out = Told::default();
+    if let Some(latest) = entries.first() {
+        let status = latest.get("status").and_then(Value::as_str).unwrap_or("");
+        if status == "WAITING" {
+            out.phase = "needs".into();
+            out.detail = "aprobación".into();
+            out.since = epoch(latest.get("created_at").and_then(Value::as_str));
+        } else if matches!(status, "RUNNING" | "GENERATING" | "PENDING" | "QUEUED") {
+            out.phase = "working".into();
+        }
+        if latest.get("type").and_then(Value::as_str) == Some("PLANNER_RESPONSE")
+            && let Some(calls) = latest.get("tool_calls").and_then(Value::as_array)
+            && let Some(name) = calls.last().and_then(|c| c.get("name")).and_then(Value::as_str)
+        {
+            out.tool = name.to_string();
+        }
+    }
+    for entry in entries {
+        if let Some(model) = entry.get("model").and_then(Value::as_str).filter(|m| !m.is_empty()) {
+            out.model = model.to_string();
+            break;
+        }
+    }
+    out
+}
+
+/// Título, fase y si es conversación raíz en `conversation_summaries.db`.
+fn agy_summary(db: &Path, id: &str) -> Option<(String, &'static str, bool)> {
+    let conn = Connection::open_with_flags(db, OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX).ok()?;
+    let _ = conn.busy_timeout(Duration::from_millis(50));
+    let (title, status, parent): (String, String, String) = conn
+        .query_row("SELECT title, status, parent_conversation_id FROM conversation_summaries WHERE conversation_id = ?1", [id], |row| {
+            Ok((row.get(0)?, row.get(1)?, row.get(2)?))
+        })
+        .ok()?;
+    let phase = match status.as_str() {
+        "CASCADE_RUN_STATUS_RUNNING" | "CASCADE_RUN_STATUS_BUSY" | "CASCADE_RUN_STATUS_CANCELING" => "working",
+        "CASCADE_RUN_STATUS_IDLE" => "idle",
+        _ => "",
+    };
+    Some((title, phase, parent.is_empty()))
+}
+
 pub struct Watcher {
     home: PathBuf,
     hz: f64,
@@ -794,6 +846,61 @@ impl Watcher {
         None
     }
 
+    /// Lo que Antigravity publica en su base de resúmenes y su transcripción.
+    fn agy(&mut self, tree: &[i32]) -> Option<Told> {
+        let mut seen = HashSet::new();
+        let mut convs = Vec::new();
+        for &p in tree {
+            let Ok(fds) = fs::read_dir(format!("/proc/{p}/fd")) else {
+                continue;
+            };
+            for fd in fds.flatten() {
+                let Ok(path) = fs::read_link(fd.path()) else {
+                    continue;
+                };
+                let shown = path.to_string_lossy();
+                if shown.contains("/conversations/")
+                    && shown.ends_with(".db")
+                    && let Some(id) = path.file_stem().and_then(|s| s.to_str())
+                    && let Some(dir) = path.parent().and_then(Path::parent)
+                    && seen.insert((dir.to_path_buf(), id.to_string()))
+                {
+                    convs.push((dir.to_path_buf(), id.to_string()));
+                }
+            }
+        }
+        // Si hay varias conversaciones abiertas (p. ej. un subagente), manda la raíz.
+        let mut chosen = None;
+        for (dir, id) in convs {
+            let summary = agy_summary(&dir.join("conversation_summaries.db"), &id);
+            let root = summary.as_ref().is_none_or(|(_, _, root)| *root);
+            let candidate = (dir, id, summary);
+            if root {
+                chosen = Some(candidate);
+                break;
+            }
+            chosen.get_or_insert(candidate);
+        }
+        let (dir, id, summary) = chosen?;
+        let transcript_path = dir.join("brain").join(&id).join(".system_generated/logs/transcript.jsonl");
+        let mut out = self.summary(&transcript_path, agy_transcript).unwrap_or_default();
+        if let Some((title, phase, _)) = summary {
+            if !title.is_empty() {
+                out.name = title;
+            }
+            if out.phase != "needs" && !phase.is_empty() {
+                out.phase = phase.into();
+            }
+        }
+        if out.phase.is_empty() {
+            return None;
+        }
+        if out.phase != "working" {
+            out.tool.clear();
+        }
+        Some(out)
+    }
+
     /// Una foto de los agentes en marcha.
     pub fn look(&mut self) -> Vec<Agent> {
         self.used_reads.clear();
@@ -846,6 +953,7 @@ impl Watcher {
             let told = match kind.0 {
                 "claude" => self.claude(pid, &sessions),
                 "codex" => self.codex(&tree),
+                "agy" | "antigravity-cli" => self.agy(&tree),
                 _ => None,
             };
             let told_ref = told.as_ref();
@@ -1086,5 +1194,62 @@ mod tests {
         assert_eq!(epoch(Some("2026-11-17T11:00:00.123+01:00")), Some(utc));
         assert_eq!(utc % 1000, 123);
         assert!(epoch(Some("not a timestamp")).is_none());
+    }
+
+    #[test]
+    fn recognizes_antigravity_and_google_programs() {
+        let argv = |parts: &[&str]| parts.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+        assert_eq!(program_of(&argv(&["/etc/profiles/per-user/elliot/bin/agy", "acp"])), Some(&("agy", "google", "Antigravity")));
+        assert_eq!(program_of(&argv(&["/nix/store/abc/bin/.agy-wrapped"])), Some(&("agy", "google", "Antigravity")));
+        assert_eq!(program_of(&argv(&["antigravity-cli"])), Some(&("antigravity-cli", "google", "Antigravity")));
+        assert_eq!(program_of(&argv(&["gemini"])), Some(&("gemini", "google", "Gemini")));
+    }
+
+    #[test]
+    fn reads_antigravity_transcript_and_summary() {
+        let working = agy_transcript(&[
+            serde_json::json!({
+                "type": "PLANNER_RESPONSE",
+                "status": "DONE",
+                "created_at": "2026-11-25T13:32:54Z",
+                "model": "gemini-4-neon-medium",
+                "tool_calls": [{"name": "read_file"}, {"name": "run_command"}]
+            }),
+            serde_json::json!({ "type": "GENERIC", "status": "DONE" }),
+        ]);
+        assert_eq!(working.model, "gemini-4-neon-medium");
+        assert_eq!(working.tool, "run_command");
+        assert_eq!(working.phase, "");
+
+        let waiting = agy_transcript(&[
+            serde_json::json!({
+                "type": "GENERIC",
+                "status": "WAITING",
+                "created_at": "2026-11-25T13:33:00.500Z"
+            }),
+            serde_json::json!({
+                "type": "PLANNER_RESPONSE",
+                "status": "DONE",
+                "model": "gemini-4-neon-xhigh"
+            }),
+        ]);
+        assert_eq!(waiting.phase, "needs");
+        assert_eq!(waiting.detail, "aprobación");
+        assert_eq!(waiting.model, "gemini-4-neon-xhigh");
+        assert_eq!(waiting.since, epoch(Some("2026-11-25T13:33:00.500Z")));
+
+        let path = std::env::temp_dir().join(format!("veyl-agy-test-{}.db", std::process::id()));
+        let _ = fs::remove_file(&path);
+        let conn = Connection::open(&path).unwrap();
+        conn.execute("CREATE TABLE conversation_summaries (conversation_id text, title text, status text, parent_conversation_id text)", []).unwrap();
+        conn.execute(
+            "INSERT INTO conversation_summaries VALUES ('c1', 'Añadir Antigravity', 'CASCADE_RUN_STATUS_RUNNING', ''), ('c2', 'Sub', 'CASCADE_RUN_STATUS_IDLE', 'c1')",
+            [],
+        )
+        .unwrap();
+        drop(conn);
+        assert_eq!(agy_summary(&path, "c1"), Some(("Añadir Antigravity".into(), "working", true)));
+        assert_eq!(agy_summary(&path, "c2"), Some(("Sub".into(), "idle", false)));
+        let _ = fs::remove_file(&path);
     }
 }
