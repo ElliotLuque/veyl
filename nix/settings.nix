@@ -98,13 +98,14 @@ in
       cfg,
       options,
       rebuild,
+      defaultFlake ? null,
     }:
     let
       settings = lib.filterAttrsRecursive (_: value: value != null) cfg.settings;
       files = lib.unique (
         map builtins.unsafeDiscardStringContext (options.settings.files ++ options.enable.files)
       );
-      flake = cfg.nix.flake;
+      flake = if cfg.nix.flake != null then cfg.nix.flake else defaultFlake;
     in
     builtins.toJSON {
       inherit settings files flake;

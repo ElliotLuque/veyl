@@ -29,6 +29,7 @@ El repositorio es un flake: `packages.veyl` (el shell, con su Quickshell 0.2.1 y
 programs.veyl = {
   enable = true;
   acceleration = "cuda";             # la voz en la GPU (o "vulkan"); sin nada, en la CPU
+  cudaCapabilities = [ "8.9" ];      # opcional con CUDA: solo tu GPU (compila en minutos)
   settings = {                       # las claves de settings.json
     scheme = "living-code-night";
     wallpaper = "${inputs.living-code}/night/switzerland.png";
@@ -38,15 +39,15 @@ programs.veyl = {
     monitors."HDMI-A-1" = { mode = "3840x2160@60.00"; scale = 1.5; position = "0x0"; };
   };
   schemes.mio = { bg = "#05080b"; accent = "#00a692"; };  # ~/.config/veyl/schemes/mio.json (solo Home Manager)
-  systemd.enable = true;             # arrancarlo con la sesión gráfica, si no lo hace el compositor (solo Home Manager)
+  systemd.enable = true;             # arrancarlo con la sesión gráfica (usa hyprland-session.target si está activo; solo Home Manager)
 };
 ```
 
-Lo declarado manda: al reconstruir, Veyl lo ve llegar (en marcha, en unos segundos) y lo pone encima de lo que hubiera en `settings.json`; lo que deja de declararse vuelve a lo de fábrica, salvo que lo hayas cambiado desde entonces. Lo que no declaras sigue siendo cosa de los ajustes. El módulo deja lo declarado en `~/.config/veyl/nix.json` (el de NixOS, en `/etc/veyl/nix.json`, para todos; gana el de Home Manager), junto con los archivos en los que se declaró `programs.veyl`.
+El paquete deja tanto `veyl` como `veyld` en `$PATH` (para `veyld statusline`, `veyld mcp`, `veyld nix`…). Lo declarado manda: al reconstruir, Veyl lo ve llegar (en marcha, en unos segundos) y lo pone encima de lo que hubiera en `settings.json`; lo que deja de declararse vuelve a lo de fábrica, salvo que lo hayas cambiado desde entonces. Lo que no declaras sigue siendo cosa de los ajustes. El módulo deja lo declarado en `~/.config/veyl/nix.json` (el de NixOS, en `/etc/veyl/nix.json`, para todos; gana el de Home Manager), junto con los archivos en los que se declaró `programs.veyl`.
 
-**Que no se separen.** Si cambias en los ajustes algo que no coincide con lo declarado (o que no está declarado y no es lo de fábrica), al pie de la isla sale cuántos ajustes no coinciden con tu configuración de Nix, con «Guardar en Nix»; en la sección **Nix**, uno a uno, con lo que vale ahora y lo que dice tu configuración, para guardarlo o deshacerlo. Guardar lo escribe veyld (`veyld nix write`) en el mismo archivo en el que declaraste `programs.veyl`, sin reescribirlo: cambia solo ese valor, o lo añade en el bloque más hondo que ya exista, con su sangría (escribas `programs.veyl.settings.x` con puntos, en bloques anidados, dentro de `home-manager.users.<tú>`, de un `lib.mkIf` o de una función de módulo). Lo que calcula una expresión (`"${inputs.x}/a.png"`, `cfg.algo`) no se pisa: dice que se cambie a mano. Lo guardado queda «falta reconstruir» hasta que lo haces; «Reconstruir» abre una terminal con la orden (`nh os switch`, `sudo nixos-rebuild switch` o `home-manager switch`, según lo que haya; `programs.veyl.nix.rebuild` la fija).
+**Que no se separen.** Si cambias en los ajustes algo que no coincide con lo declarado (o que no está declarado y no es lo de fábrica), al pie de la isla sale cuántos ajustes no coinciden con tu configuración de Nix, con «Guardar en Nix»; en la sección **Nix**, uno a uno, con lo que vale ahora y lo que dice tu configuración, para guardarlo o deshacerlo. Guardar lo escribe veyld (`veyld nix write`) en el mismo archivo en el que declaraste `programs.veyl` (y si lo repartes entre varios archivos, como uno común y otro por máquina, edita el que ya declara cada ajuste), sin reescribirlo: cambia solo ese valor, o lo añade en el bloque más hondo que ya exista, con su sangría (escribas `programs.veyl.settings.x` con puntos, en bloques anidados, dentro de `home-manager.users.<tú>`, de un módulo de `flake-parts`, de un `lib.mkIf` o de una función de módulo). Lo que calcula una expresión (`"${inputs.x}/a.png"`, `cfg.algo`) no se pisa: dice que se cambie a mano. Lo guardado queda «falta reconstruir» hasta que lo haces; «Reconstruir» abre una terminal con la orden (`nh os switch`, `sudo nixos-rebuild switch` o `home-manager switch`, según lo que haya; `programs.veyl.nix.rebuild` la fija).
 
-Con un flake, el sistema de módulos da el archivo dentro del almacén; veyld busca el mismo camino en la carpeta del flake: `programs.veyl.nix.flake`, `$NH_FLAKE`, `$FLAKE`, `/etc/nixos` o `~/.config/home-manager`. `programs.veyl.nix.file` fija el archivo a mano. Sin el módulo pero en NixOS, la sección **Nix** copia lo que tienes como un bloque `programs.veyl = { … };` para pegarlo en tu configuración.
+Con un flake, el sistema de módulos da el archivo dentro del almacén; veyld busca el mismo camino en la carpeta del flake: `programs.veyl.nix.flake`, `programs.nh.flake`, `$NH_FLAKE`, `$FLAKE`, `/etc/nixos` o `~/.config/home-manager`. `programs.veyl.nix.file` fija el archivo a mano. Sin el módulo pero en NixOS, la sección **Nix** copia lo que tienes como un bloque `programs.veyl = { … };` para pegarlo en tu configuración.
 
 `veyld nix` dice dónde está declarado; `veyld nix show '<ajustes en JSON>'`, cómo se escribirían.
 

@@ -15,6 +15,7 @@ let
   inherit (lib) mkOption mkEnableOption types;
   cfg = config.programs.veyl;
   common = import ./settings.nix { inherit lib pkgs; };
+  nhFlake = config.programs.nh.flake or null;
   rebuild =
     if config.programs.nh.enable or false then "nh os switch" else "sudo nixos-rebuild switch";
 in
@@ -24,8 +25,8 @@ in
 
     package = mkOption {
       type = types.package;
-      default = flake.lib.package pkgs { inherit (cfg) acceleration; };
-      defaultText = lib.literalMD "el de este flake, con `acceleration`";
+      default = flake.lib.package pkgs { inherit (cfg) acceleration cudaCapabilities; };
+      defaultText = lib.literalMD "el de este flake, con `acceleration` y `cudaCapabilities`";
       description = "El paquete de Veyl.";
     };
 
@@ -42,6 +43,17 @@ in
         necesita `allowUnfree`) o `vulkan`, en la GPU.
       '';
     };
+
+    cudaCapabilities = mkOption {
+      type = types.nullOr (types.listOf types.str);
+      default = null;
+      example = [ "8.9" ];
+      description = ''
+        Arquitecturas CUDA para compilar `veyld` cuando `acceleration = "cuda"`
+        (por ejemplo `[ "8.9" ]` para una RTX 40). Sin fijar, usa las de
+        `pkgs.cudaPackages` (mucho más lento de compilar).
+      '';
+    };
   };
 
   config = lib.mkIf cfg.enable {
@@ -49,6 +61,7 @@ in
 
     environment.etc."veyl/nix.json".text = common.manifest {
       inherit cfg rebuild;
+      defaultFlake = nhFlake;
       options = options.programs.veyl;
     };
   };

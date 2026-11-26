@@ -47,20 +47,74 @@ pub enum Say {
     Hush,
 }
 
-/// Lo de veyld que no es Rust: `veyld/.tools` y `veyld/speech`, junto al binario
-/// (veyld/target/release/veyld).
-fn home() -> Option<PathBuf> {
-    Some(std::env::current_exe().ok()?.parent()?.parent()?.parent()?.to_path_buf())
+/// La raíz del repositorio en desarrollo, cuando se corre `veyld/target/release/veyld`.
+fn dev_home() -> Option<PathBuf> {
+    let home = std::env::current_exe().ok()?.parent()?.parent()?.parent()?.to_path_buf();
+    (home.join("Cargo.toml").is_file() || home.join(".tools").is_dir() || home.join("speech").is_dir()).then_some(home)
+}
+
+/// Dónde viven los datos editables del usuario (`$XDG_DATA_HOME/veyl`).
+fn data_dir() -> PathBuf {
+    let data = std::env::var_os("XDG_DATA_HOME").filter(|v| !v.is_empty()).map(PathBuf::from).unwrap_or_else(|| crate::config::home().join(".local/share"));
+    data.join("veyl")
+}
+
+/// Dónde está un binario en `$PATH`.
+fn in_path(name: &str) -> Option<PathBuf> {
+    std::env::var_os("PATH").and_then(|path| std::env::split_paths(&path).map(|d| d.join(name)).find(|p| p.is_file()))
+}
+
+/// Un archivo de `speech/` (`xtts.py`, `install.sh`): en el paquete de Nix
+/// (`$VEYLD_SHARE/speech/` o `<bin>/../share/veyld/speech/`) o en el árbol de desarrollo.
+pub fn speech_file(name: &str) -> Option<PathBuf> {
+    let mut candidates = Vec::new();
+    if let Some(share) = std::env::var_os("VEYLD_SHARE").filter(|v| !v.is_empty()) {
+        candidates.push(PathBuf::from(share).join("speech").join(name));
+    }
+    if let Ok(exe) = std::env::current_exe()
+        && let Some(prefix) = exe.parent().and_then(|bin| bin.parent())
+    {
+        candidates.push(prefix.join("share/veyld/speech").join(name));
+    }
+    if let Some(home) = dev_home() {
+        candidates.push(home.join("speech").join(name));
+    }
+    candidates.into_iter().find(|p| p.is_file())
+}
+
+/// Carpeta editable con el entorno de XTTS (`~/.local/share/veyl/xtts`, o el
+/// `veyld/.tools` clásico si ya estaba ahí).
+fn xtts_tools() -> Option<PathBuf> {
+    let user = data_dir().join("xtts");
+    if user.join("venv/bin/python").is_file() || user.join("xtts/bin/python").is_file() {
+        return Some(user);
+    }
+    dev_home().map(|h| h.join(".tools")).filter(|d| d.join("xtts/bin/python").is_file())
 }
 
 /// Lo que hace falta para XTTS, si está todo: python, el servidor, el modelo y sox.
 fn xtts_parts() -> Option<(PathBuf, PathBuf, PathBuf, PathBuf)> {
-    let home = home()?;
-    let python = home.join(".tools/xtts/bin/python");
-    let script = home.join("speech/xtts.py");
+    let tools = xtts_tools()?;
+    let python = [tools.join("venv/bin/python"), tools.join("xtts/bin/python")].into_iter().find(|p| p.is_file())?;
+    let script = speech_file("xtts.py")?;
     let model = voice::models().join("xtts-v2");
-    let sox = home.join(".tools/sox/bin/sox");
-    (python.is_file() && script.is_file() && model.join("model.pth").is_file() && sox.is_file()).then_some((python, script, model, sox))
+    let sox = in_path("sox").or_else(|| [tools.join("sox/bin/sox")].into_iter().find(|p| p.is_file()))?;
+    model.join("model.pth").is_file().then_some((python, script, model, sox))
+}
+
+fn xtts_libs(tools: &std::path::Path) -> String {
+    let mut dirs = Vec::new();
+    if let Ok(extra) = std::env::var("VEYLD_CC_LIB")
+        && !extra.is_empty()
+    {
+        dirs.push(extra);
+    }
+    let bundled = tools.join("cc-lib-lib/lib");
+    if bundled.is_dir() {
+        dirs.push(bundled.display().to_string());
+    }
+    dirs.push("/run/opengl-driver/lib".into());
+    dirs.join(":")
 }
 
 /// Si se habla con XTTS.
@@ -90,9 +144,9 @@ const CINEMA: &str = "cine-suave-1";
 
 impl Xtts {
     fn start(style: &Style) -> Result<Xtts, String> {
-        let (python, script, model, sox) = xtts_parts().ok_or("XTTS no está instalado (veyld/speech/install.sh)")?;
+        let (python, script, model, sox) = xtts_parts().ok_or("XTTS no está instalado (veyl voice get xtts)")?;
         let voice = if style.voice.is_empty() { SPEAKER.to_string() } else { style.voice.clone() };
-        let libs = home().map(|h| h.join(".tools/cc-lib-lib/lib").display().to_string()).unwrap_or_default();
+        let libs = xtts_tools().map(|tools| xtts_libs(&tools)).unwrap_or_else(|| "/run/opengl-driver/lib".into());
         let mut child = Command::new(python)
             .arg("-I")
             .arg(script)
@@ -101,7 +155,7 @@ impl Xtts {
             .args(["--speaker", &voice, "--speed", &format!("{:.2}", style.speed)])
             .arg("--sox")
             .arg(sox)
-            .env("LD_LIBRARY_PATH", format!("{libs}:/run/opengl-driver/lib"))
+            .env("LD_LIBRARY_PATH", libs)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::null())
@@ -200,12 +254,10 @@ fn rate(model: &std::path::Path) -> u32 {
 
 /// Dónde está piper: en $PATH o junto a veyld (`build.sh` lo trae a `.tools/`).
 fn piper() -> Option<PathBuf> {
-    if let Some(found) = std::env::var_os("PATH").and_then(|path| std::env::split_paths(&path).map(|d| d.join("piper")).find(|p| p.is_file())) {
+    if let Some(found) = in_path("piper") {
         return Some(found);
     }
-    let exe = std::env::current_exe().ok()?;
-    // veyld/target/release/veyld → veyld/.tools/piper/bin/piper
-    let near = exe.parent()?.parent()?.parent()?.join(".tools/piper/bin/piper");
+    let near = dev_home()?.join(".tools/piper/bin/piper");
     near.is_file().then_some(near)
 }
 

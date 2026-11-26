@@ -323,11 +323,7 @@ fn models() {
 fn fetch(name: &str) -> Result<(), String> {
     if name == "xtts" {
         // La voz de película: entorno de Python, PyTorch y el modelo (~1,8 GB); acepta la licencia CPML.
-        let script = std::env::current_exe()
-            .ok()
-            .and_then(|e| Some(e.parent()?.parent()?.parent()?.join("speech/install.sh")))
-            .filter(|p| p.is_file())
-            .ok_or("no encuentro veyld/speech/install.sh")?;
+        let script = tts::speech_file("install.sh").ok_or("no encuentro speech/install.sh")?;
         let ok = std::process::Command::new("sh").arg(script).status().map_err(|e| e.to_string())?.success();
         return if ok { Ok(()) } else { Err("no se pudo instalar XTTS".into()) };
     }

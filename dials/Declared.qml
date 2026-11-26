@@ -39,9 +39,9 @@ Column {
 
         Option {
             glyph: "file-code"
-            title: Nix.declared ? "Archivo" : "Sin declarar"
+            title: Nix.declared ? (Nix.files.length > 1 ? "Archivos" : "Archivo") : "Sin declarar"
             tone: Nix.problem ? Tokens.attention : Tokens.dim
-            text: Nix.file ? Nix.file.replace(Quickshell.env("HOME"), "~") : Nix.problem || (Nix.declared ? "Buscando…" : "programs.veyl no está en tu configuración")
+            text: Nix.file ? (Nix.file.replace(Quickshell.env("HOME"), "~") + (Nix.files.length > 1 ? ` (+${Nix.files.length - 1})` : "")) : Nix.problem || (Nix.declared ? "Buscando…" : "programs.veyl no está en tu configuración")
 
             Button {
                 icon: "arrow-square-out"

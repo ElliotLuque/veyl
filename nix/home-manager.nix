@@ -27,6 +27,14 @@ let
   common = import ./settings.nix { inherit lib pkgs; };
   nh = config.programs.nh.enable or false;
   nixos = osConfig != null;
+  nhFlake =
+    if (config.programs.nh.flake or null) != null then
+      config.programs.nh.flake
+    else if nixos then
+      osConfig.programs.nh.flake or null
+    else
+      null;
+  hyprlandSystemd = config.wayland.windowManager.hyprland.systemd.enable or false;
   rebuild =
     if nixos then
       (
@@ -43,8 +51,8 @@ in
 
     package = mkOption {
       type = types.package;
-      default = flake.lib.package pkgs { inherit (cfg) acceleration; };
-      defaultText = lib.literalMD "el de este flake, con `acceleration`";
+      default = flake.lib.package pkgs { inherit (cfg) acceleration cudaCapabilities; };
+      defaultText = lib.literalMD "el de este flake, con `acceleration` y `cudaCapabilities`";
       description = "El paquete de Veyl.";
     };
 
@@ -62,6 +70,17 @@ in
       '';
     };
 
+    cudaCapabilities = mkOption {
+      type = types.nullOr (types.listOf types.str);
+      default = null;
+      example = [ "8.9" ];
+      description = ''
+        Arquitecturas CUDA para compilar `veyld` cuando `acceleration = "cuda"`
+        (por ejemplo `[ "8.9" ]` para una RTX 40). Sin fijar, usa las de
+        `pkgs.cudaPackages` (mucho más lento de compilar).
+      '';
+    };
+
     schemes = mkOption {
       type = types.attrsOf (pkgs.formats.json { }).type;
       default = { };
@@ -73,7 +92,8 @@ in
       enable = mkEnableOption "arrancar Veyl como servicio de usuario con la sesión gráfica";
       target = mkOption {
         type = types.str;
-        default = "graphical-session.target";
+        default = if hyprlandSystemd then "hyprland-session.target" else "graphical-session.target";
+        defaultText = lib.literalMD "`hyprland-session.target` si `wayland.windowManager.hyprland.systemd.enable`, si no `graphical-session.target`";
         description = "Con qué objetivo de systemd arranca y se para.";
       };
     };
@@ -85,6 +105,7 @@ in
     xdg.configFile = {
       "veyl/nix.json".text = common.manifest {
         inherit cfg rebuild;
+        defaultFlake = nhFlake;
         options = options.programs.veyl;
       };
     }
@@ -101,6 +122,7 @@ in
       Service = {
         ExecStart = lib.getExe cfg.package;
         Restart = "on-failure";
+        RestartSec = 2;
       };
       Install.WantedBy = [ cfg.systemd.target ];
     };

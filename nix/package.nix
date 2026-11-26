@@ -56,6 +56,7 @@ stdenvNoCC.mkDerivation {
       ../fonts
       ../logos
       ../data/symbols.json
+      ../data/cards.json
       ../bin
     ];
   };
@@ -76,6 +77,7 @@ stdenvNoCC.mkDerivation {
         ]
       } \
       --suffix PATH : ${lib.makeBinPath tools}
+    ln -s ${lib.getExe veyld} $out/bin/veyld
     runHook postInstall
   '';
 

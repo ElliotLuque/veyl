@@ -22,12 +22,13 @@ Singleton {
     readonly property bool declared: used !== null
     readonly property var settings: used?.settings ?? {}
 
-    // Lo que cuenta veyld: { nixos, declared, file, error, rebuild }.
+    // Lo que cuenta veyld: { nixos, declared, file, files, error, rebuild }.
     property var status: ({})
     readonly property bool nixos: status.nixos === true
     // Si hay que enseñar algo de Nix: en NixOS, o con Veyl declarado.
     readonly property bool active: nixos || declared
     readonly property string file: status.file ?? ""
+    readonly property var files: status.files ?? (file ? [file] : [])
     readonly property string problem: status.error ?? ""
     readonly property string rebuild: status.rebuild ?? used?.rebuild ?? ""
     property bool busy: false

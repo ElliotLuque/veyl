@@ -1,8 +1,8 @@
 # veyld como paquete de Nix: pkgs.callPackage ./veyld/package.nix { }
 #
 # La voz se transcribe en la CPU; para la GPU, `acceleration = "cuda"`
-# (NVIDIA; necesita `allowUnfree`, y `cudaCapabilities` acorta mucho la
-# compilación: [ "8.9" ] para una RTX 40) o `acceleration = "vulkan"`.
+# (NVIDIA; necesita `allowUnfree`, y `cudaCapabilities = [ "8.9" ]` acorta
+# mucho la compilación) o `acceleration = "vulkan"`.
 {
   lib,
   rustPlatform,
@@ -11,8 +11,15 @@
   cmake,
   makeWrapper,
   piper-tts,
+  pipewire,
+  wireplumber,
+  curl,
+  playerctl,
+  xdg-utils,
+  sox,
   sqlite,
   acceleration ? null,
+  cudaCapabilities ? null,
   cudaPackages ? null,
   autoAddDriverRunpath ? null,
   shaderc ? null,
@@ -35,6 +42,15 @@ let
     mkdir -p $out/lib
     ${stdenv.cc.targetPrefix}ar rcs $out/lib/libculibos.a
   '';
+  runtimeTools = [
+    piper-tts
+    pipewire
+    wireplumber
+    curl
+    playerctl
+    xdg-utils
+    sox
+  ];
 in
 rustPlatform.buildRustPackage {
   pname = "veyld";
@@ -46,6 +62,7 @@ rustPlatform.buildRustPackage {
       ./Cargo.lock
       ./src
       ./grammar
+      ./speech
     ];
   };
   cargoLock.lockFile = ./Cargo.lock;
@@ -69,7 +86,7 @@ rustPlatform.buildRustPackage {
   ]
   ++ lib.optionals cuda [
     cudaPackages.cuda_cudart
-    cudaPackages.cuda_cccl
+    (cudaPackages.cccl or cudaPackages.cuda_cccl)
     cudaPackages.libcublas
   ]
   ++ lib.optionals vulkan [
@@ -77,7 +94,11 @@ rustPlatform.buildRustPackage {
     vulkan-loader
   ];
   env = lib.optionalAttrs cuda {
-    CMAKE_CUDA_ARCHITECTURES = cudaPackages.flags.cmakeCudaArchitecturesString;
+    CMAKE_CUDA_ARCHITECTURES =
+      if cudaCapabilities != null then
+        lib.concatMapStringsSep ";" (cap: builtins.replaceStrings [ "." ] [ "" ] cap) cudaCapabilities
+      else
+        cudaPackages.flags.cmakeCudaArchitecturesString;
     # libcuda.so es del controlador: para enlazar basta su sustituto.
     RUSTFLAGS = "-L ${lib.getLib cudaPackages.cuda_cudart}/lib/stubs -L ${culibos}/lib";
   };
@@ -85,9 +106,14 @@ rustPlatform.buildRustPackage {
   # Esta mira las aplicaciones instaladas (firefox, spotify): en el sandbox no hay.
   checkFlags = [ "--skip=daemon::tests::search_and_play" ];
 
-  # La voz de Veyl la pone piper.
+  # Piper, utilidades de audio/red y los scripts de XTTS-v2 (sin depender del árbol de fuentes).
   postInstall = ''
-    wrapProgram $out/bin/veyld --suffix PATH : ${lib.makeBinPath [ piper-tts ]}
+    install -Dm644 speech/xtts.py $out/share/veyld/speech/xtts.py
+    install -Dm755 speech/install.sh $out/share/veyld/speech/install.sh
+    wrapProgram $out/bin/veyld \
+      --suffix PATH : ${lib.makeBinPath runtimeTools} \
+      --set-default VEYLD_SHARE "$out/share/veyld" \
+      --set-default VEYLD_CC_LIB "${stdenv.cc.cc.lib}/lib"
   '';
 
   meta = {

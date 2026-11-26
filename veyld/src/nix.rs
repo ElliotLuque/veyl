@@ -68,23 +68,57 @@ fn roots(manifest: &Value) -> Vec<PathBuf> {
     roots
 }
 
-/// El archivo de tu configuración donde vive `programs.veyl`: el fijado a
-/// mano o, de los que da el sistema de módulos, el primero que se encuentre
-/// fuera del almacén (con un flake, el mismo camino dentro de su carpeta).
-pub fn locate(manifest: &Value) -> Result<PathBuf, String> {
-    if let Some(file) = manifest.get("file").and_then(Value::as_str).filter(|f| !f.is_empty()) {
-        let path = PathBuf::from(file);
-        return if path.is_file() { Ok(path) } else { Err(format!("no existe {}", config::tilde(file))) };
+/// Una ruta que viene del sistema de módulos puede llevar anotaciones al final
+/// (por ejemplo, flake-parts añade «, via option flake.modules.homeManager.veyl»).
+/// Devuelve la ruta limpia y, si la trae, el camino de la opción de origen.
+fn split_module_file(raw: &str) -> (&str, Option<Vec<String>>) {
+    let Some((path, rest)) = raw.split_once(", via ") else {
+        return (raw.trim(), None);
+    };
+    let option = rest.trim().strip_prefix("option ").map(|opt| opt.trim().split('.').filter(|part| !part.is_empty()).map(str::to_string).collect::<Vec<_>>());
+    (path.trim(), option.filter(|parts| !parts.is_empty()))
+}
+
+fn expand_home(raw: &str) -> PathBuf {
+    match raw.trim().strip_prefix("~/") {
+        Some(rest) => config::home().join(rest),
+        None => PathBuf::from(raw.trim()),
+    }
+}
+
+/// Un archivo resuelto fuera del almacén, con la opción de origen si venía de
+/// un registro de módulos (flake-parts) para desambiguar si hay varios bloques.
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct TargetFile {
+    path: PathBuf,
+    scope: Option<Vec<String>>,
+}
+
+/// Todos los archivos de tu configuración donde vive `programs.veyl`: el fijado
+/// a mano o, de los que da el sistema de módulos, los que se encuentren fuera
+/// del almacén (con un flake, el mismo camino dentro de su carpeta).
+fn locate_all(manifest: &Value) -> Result<Vec<TargetFile>, String> {
+    if let Some(file) = manifest.get("file").and_then(Value::as_str).filter(|f| !f.trim().is_empty()) {
+        let path = expand_home(file);
+        return if path.is_file() { Ok(vec![TargetFile { path, scope: None }]) } else { Err(format!("no existe {}", config::tilde(&path.to_string_lossy()))) };
     }
     let files: Vec<&str> = manifest.get("files").and_then(Value::as_array).map(|files| files.iter().filter_map(Value::as_str).collect()).unwrap_or_default();
     if files.is_empty() {
         return Err("el módulo no sabe en qué archivo está programs.veyl: fíjalo con programs.veyl.nix.file".into());
     }
     let roots = roots(manifest);
-    for file in &files {
+    let mut found = Vec::new();
+    let mut push_target = |path: PathBuf, scope: Option<Vec<String>>| {
+        if !found.iter().any(|existing: &TargetFile| existing.path == path && existing.scope == scope) {
+            found.push(TargetFile { path, scope });
+        }
+    };
+    for raw in &files {
+        let (file, scope) = split_module_file(raw);
         let Some(rest) = file.strip_prefix("/nix/store/") else {
-            if Path::new(file).is_file() {
-                return Ok(PathBuf::from(file));
+            let path = expand_home(file);
+            if path.is_file() {
+                push_target(path, scope);
             }
             continue;
         };
@@ -95,11 +129,12 @@ pub fn locate(manifest: &Value) -> Result<PathBuf, String> {
         for root in &roots {
             let path = root.join(relative);
             if fs::read_to_string(&path).is_ok_and(|text| text.contains("veyl")) {
-                return Ok(path);
+                push_target(path, scope.clone());
+                break;
             }
         }
     }
-    Err("no encuentro la carpeta de tu flake: dila en programs.veyl.nix.flake (o en $NH_FLAKE)".into())
+    if found.is_empty() { Err("no encuentro la carpeta de tu flake: dila en programs.veyl.nix.flake (o en $NH_FLAKE)".into()) } else { Ok(found) }
 }
 
 /// Lo que se cuenta de Nix a Veyl: si es NixOS, si Veyl está declarado,
@@ -114,8 +149,17 @@ pub fn status() -> Value {
         "manifest": path,
         "rebuild": manifest.get("rebuild").cloned().unwrap_or(Value::Null),
     });
-    match locate(&manifest) {
-        Ok(file) => status["file"] = json!(file),
+    match locate_all(&manifest) {
+        Ok(targets) => {
+            status["file"] = json!(targets[0].path);
+            let mut paths: Vec<&PathBuf> = Vec::new();
+            for target in &targets {
+                if !paths.contains(&&target.path) {
+                    paths.push(&target.path);
+                }
+            }
+            status["files"] = json!(paths);
+        }
         Err(why) => status["error"] = json!(why),
     }
     status
@@ -139,18 +183,82 @@ impl Change {
     }
 }
 
-/// Escribe los cambios en el archivo de tu configuración. Devuelve cuál.
-pub fn write(changes: &[Change]) -> Result<PathBuf, String> {
-    let (_, manifest) = manifest().ok_or("Veyl no está en tu configuración de Nix")?;
-    let file = locate(&manifest)?;
-    let mut text = fs::read_to_string(&file).map_err(|e| format!("{}: {e}", file.display()))?;
-    for change in changes {
-        text = edit(&text, change).map_err(|why| format!("{}: {why}", config::tilde(&file.to_string_lossy())))?;
+/// Qué tan bien encaja un archivo para un cambio concreto: si ya declara la
+/// clave exacta gana; si no, el que tenga el bloque padre más hondo bajo
+/// `settings`; si ninguno, 0 (se queda el primero).
+fn affinity(text: &str, scope: Option<&[String]>, change: &Change) -> usize {
+    let parse = rnix::Root::parse(text);
+    if !parse.errors().is_empty() {
+        return 0;
     }
-    // Junto al original y luego encima: un corte no deja el archivo a medias.
-    let temporary = file.with_extension("nix.veyl~");
-    fs::write(&temporary, &text).and_then(|()| fs::rename(&temporary, &file)).map_err(|e| format!("{}: {e}", file.display()))?;
-    Ok(file)
+    let mut bindings = Vec::new();
+    walk(parse.tree().expr(), &[], &mut bindings);
+    let mut target = vec!["settings".to_string()];
+    target.extend(change.path.iter().cloned());
+    let ours = scoped_bindings(&bindings, scope);
+    if ours.iter().any(|(_, rel)| *rel == target.as_slice()) {
+        return 1000 + target.len();
+    }
+    if change.value.is_none() && ours.iter().any(|(_, rel)| rel.starts_with(&target)) {
+        return 1000 + target.len();
+    }
+    // Solo cuentan bloques bajo `settings.<algo>` (no el `settings = { }` genérico).
+    ours.iter()
+        .filter(|(b, rel)| rel.len() > 1 && target.starts_with(rel) && matches!(b.node.value(), Some(ast::Expr::AttrSet(_))))
+        .map(|(_, rel)| rel.len())
+        .max()
+        .unwrap_or(0)
+}
+
+/// Escribe los cambios en tu configuración (en el archivo que ya declara cada
+/// ajuste cuando hay varios, como uno común y otro por máquina). Devuelve los
+/// archivos modificados.
+pub fn write(changes: &[Change]) -> Result<Vec<PathBuf>, String> {
+    let (_, manifest) = manifest().ok_or("Veyl no está en tu configuración de Nix")?;
+    let targets = locate_all(&manifest)?;
+    let mut texts: Vec<String> = Vec::with_capacity(targets.len());
+    for target in &targets {
+        texts.push(fs::read_to_string(&target.path).map_err(|e| format!("{}: {e}", target.path.display()))?);
+    }
+    let mut touched = vec![false; targets.len()];
+    for change in changes {
+        // Si dos entradas apuntan al mismo archivo, sus textos van sincronizados al final.
+        let chosen = if targets.len() == 1 {
+            0
+        } else {
+            let mut best = 0;
+            let mut best_score = affinity(&texts[0], targets[0].scope.as_deref(), change);
+            for (index, target) in targets.iter().enumerate().skip(1) {
+                let score = affinity(&texts[index], target.scope.as_deref(), change);
+                if score > best_score {
+                    best = index;
+                    best_score = score;
+                }
+            }
+            best
+        };
+        let path = &targets[chosen].path;
+        let updated =
+            edit(&texts[chosen], change, targets[chosen].scope.as_deref()).map_err(|why| format!("{}: {why}", config::tilde(&path.to_string_lossy())))?;
+        // Mantener sincronizadas posibles entradas duplicadas sobre el mismo archivo.
+        for (index, target) in targets.iter().enumerate() {
+            if target.path == *path {
+                texts[index] = updated.clone();
+            }
+        }
+        touched[chosen] = true;
+    }
+    let mut written = Vec::new();
+    for (index, target) in targets.iter().enumerate() {
+        if !touched[index] || written.contains(&target.path) {
+            continue;
+        }
+        // Junto al original y luego encima: un corte no deja el archivo a medias.
+        let temporary = target.path.with_extension("nix.veyl~");
+        fs::write(&temporary, &texts[index]).and_then(|()| fs::rename(&temporary, &target.path)).map_err(|e| format!("{}: {e}", target.path.display()))?;
+        written.push(target.path.clone());
+    }
+    Ok(written)
 }
 
 /// Un nombre de atributo como se escribe: tal cual si se puede, si no, entre comillas.
@@ -297,6 +405,20 @@ fn under_veyl(full: &[String]) -> Option<&[String]> {
     full.windows(2).position(|pair| pair[0] == "programs" && pair[1] == "veyl").map(|at| &full[at + 2..])
 }
 
+/// Las asignaciones bajo `programs.veyl`. Si el módulo venía con un camino de
+/// opción (flake-parts, «flake.modules.homeManager.veyl») y alguna cae dentro
+/// de él, se queda solo con esas para no tocar otro bloque del mismo archivo.
+fn scoped_bindings<'a>(bindings: &'a [Binding], scope: Option<&[String]>) -> Vec<(&'a Binding, &'a [String])> {
+    let all: Vec<(&Binding, &[String])> = bindings.iter().filter_map(|b| under_veyl(&b.full).map(|rel| (b, rel))).collect();
+    if let Some(prefix) = scope {
+        let filtered: Vec<(&Binding, &[String])> = all.iter().copied().filter(|(b, _)| b.full.starts_with(prefix)).collect();
+        if !filtered.is_empty() {
+            return filtered;
+        }
+    }
+    all
+}
+
 /// Si una expresión es un valor escrito tal cual (y se puede cambiar por otro).
 fn plain(expr: &ast::Expr) -> bool {
     match expr {
@@ -320,7 +442,7 @@ fn indent_at(text: &str, offset: usize) -> String {
 }
 
 /// El texto con un cambio hecho.
-pub fn edit(text: &str, change: &Change) -> Result<String, String> {
+pub fn edit(text: &str, change: &Change, scope: Option<&[String]>) -> Result<String, String> {
     let parse = rnix::Root::parse(text);
     if let Some(error) = parse.errors().first() {
         return Err(format!("no se puede leer: {error}"));
@@ -332,7 +454,7 @@ pub fn edit(text: &str, change: &Change) -> Result<String, String> {
     let shown = format!("programs.veyl.{}", target.join("."));
 
     // Las que ya hay bajo programs.veyl, con su camino desde ahí.
-    let ours: Vec<(&Binding, &[String])> = bindings.iter().filter_map(|b| under_veyl(&b.full).map(|rel| (b, rel))).collect();
+    let ours = scoped_bindings(&bindings, scope);
     if ours.is_empty() {
         return Err("no aparece programs.veyl".into());
     }
@@ -434,8 +556,9 @@ pub fn cli(args: &[String]) -> Result<(), String> {
         Some("write") => {
             let changes: Value = serde_json::from_str(args.get(1).ok_or("falta lo que se escribe")?).map_err(|e| e.to_string())?;
             let changes = changes.as_array().ok_or("se esperaba una lista de cambios")?.iter().map(Change::parse).collect::<Result<Vec<_>, _>>()?;
-            let file = write(&changes)?;
-            println!("{}", json!({ "file": file, "written": changes.len() }));
+            let files = write(&changes)?;
+            let file = files.first().cloned().unwrap_or_default();
+            println!("{}", json!({ "file": file, "files": files, "written": changes.len() }));
             Ok(())
         }
         // `veyld nix show '{"scheme": "…"}'`: cómo se escribiría en una configuración nueva.
@@ -454,12 +577,12 @@ mod tests {
 
     fn set(text: &str, path: &[&str], value: Value) -> String {
         let change = Change { path: path.iter().map(|s| s.to_string()).collect(), value: Some(value) };
-        edit(text, &change).unwrap()
+        edit(text, &change, None).unwrap()
     }
 
     fn unset(text: &str, path: &[&str]) -> String {
         let change = Change { path: path.iter().map(|s| s.to_string()).collect(), value: None };
-        edit(text, &change).unwrap()
+        edit(text, &change, None).unwrap()
     }
 
     #[test]
@@ -503,7 +626,7 @@ mod tests {
     fn no_pisa_una_expresion() {
         let text = "{ inputs, ... }: {\n  programs.veyl.settings.wallpaper = \"${inputs.wall}/a.png\";\n}\n";
         let change = Change { path: vec!["wallpaper".into()], value: Some(json!("/b.png")) };
-        assert!(edit(text, &change).is_err());
+        assert!(edit(text, &change, None).is_err());
     }
 
     #[test]
@@ -520,5 +643,45 @@ mod tests {
         let text = "{ programs.veyl = { enable = true; }; }";
         let out = set(text, &["quiet"], json!(false));
         assert_eq!(out, "{ programs.veyl = { enable = true; settings.quiet = false; }; }");
+    }
+
+    #[test]
+    fn limpia_sufijo_de_flake_parts_y_encuentra_varios_archivos() {
+        let dir = std::env::temp_dir().join(format!("veyl-nix-test-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(dir.join("modules/desktop")).unwrap();
+        fs::create_dir_all(dir.join("hosts/pc")).unwrap();
+        let shared = dir.join("modules/desktop/veyl.nix");
+        let host = dir.join("hosts/pc/default.nix");
+        fs::write(&shared, "{ ... }: { flake.modules.homeManager.veyl = { programs.veyl.enable = true; }; }\n").unwrap();
+        fs::write(&host, "{ ... }: { flake.modules.nixos.host-pc = { home-manager.users.t.programs.veyl.settings.monitors.\"HDMI-A-1\".scale = 1.5; }; }\n")
+            .unwrap();
+        let manifest = json!({
+            "flake": dir.to_string_lossy(),
+            "files": [
+                "/nix/store/aaaa-source/modules/desktop/veyl.nix, via option flake.modules.homeManager.veyl",
+                "/nix/store/aaaa-source/hosts/pc/default.nix, via option flake.modules.nixos.host-pc"
+            ]
+        });
+        let targets = locate_all(&manifest).unwrap();
+        assert_eq!(targets.len(), 2);
+        assert_eq!(targets[0].path, shared);
+        assert_eq!(targets[0].scope.as_deref(), Some(&["flake".into(), "modules".into(), "homeManager".into(), "veyl".into()][..]));
+        assert_eq!(targets[1].path, host);
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn desambigua_bloques_de_flake_parts_y_elige_archivo_por_afinidad() {
+        let shared = "{ ... }: {\n  flake.modules.nixos.veyl = {\n    programs.veyl.enable = true;\n  };\n  flake.modules.homeManager.veyl = {\n    programs.veyl = {\n      enable = true;\n      settings.scheme = \"a\";\n    };\n  };\n}\n";
+        let scope = vec!["flake".into(), "modules".into(), "homeManager".into(), "veyl".into()];
+        let out = edit(shared, &Change { path: vec!["quiet".into()], value: Some(json!(true)) }, Some(&scope)).unwrap();
+        assert!(out.contains("settings.scheme = \"a\";\n      settings.quiet = true;"), "{out}");
+
+        let host = "{ ... }: {\n  home-manager.users.elliot.programs.veyl.settings.monitors = {\n    \"HDMI-A-1\".scale = 1.5;\n  };\n}\n";
+        let mon_change = Change { path: vec!["monitors".into(), "HDMI-A-2".into(), "scale".into()], value: Some(json!(1.0)) };
+        let scheme_change = Change { path: vec!["scheme".into()], value: Some(json!("b")) };
+        assert!(affinity(host, None, &mon_change) > affinity(shared, Some(&scope), &mon_change));
+        assert!(affinity(shared, Some(&scope), &scheme_change) > affinity(host, None, &scheme_change));
     }
 }
