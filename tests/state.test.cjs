@@ -391,6 +391,18 @@ test('deshacer vuelve a lo declarado, o a lo de fábrica si no se declaró', () 
     assert.deepEqual(json(n.Settings.voice), {});
 });
 
+test('deshacer todo revierte solo los cambios sin guardar y limpia el error', () => {
+    const n = nix({ scheme: 'a', quiet: true, voice: { speed: 2 } }, { scheme: 'b' });
+    n.failure = 'error previo';
+    n.memory.written = { '["quiet"]': 'true' };
+    Object.defineProperty(n, 'unsaved', { get: () => n.compare(n.current, n.settings, n.memory.written).filter(g => !g.written) });
+    n.revertAll();
+    assert.equal(n.failure, '');
+    assert.equal(n.Settings.scheme, 'b');
+    assert.deepEqual(json(n.Settings.voice), {});
+    assert.equal(n.Settings.quiet, true);
+});
+
 function daemon() {
     const d = load('Daemon', {
         thinking: null, card: null, shut: null, query: '', serial: 0, connected: true, sent: [], Recall: {},

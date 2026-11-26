@@ -79,6 +79,7 @@ Singleton {
     readonly property var drift: compare(current, settings, memory.written)
     readonly property var unsaved: drift.filter(group => !group.written)
     readonly property var unbuilt: drift.filter(group => group.written)
+    onDriftChanged: if (failure && drift.length === 0) failure = ""
 
     // Hoja a hoja: { '["voice","speed"]': { path, value } }. Lo vacío de dentro
     // de un objeto (null, "") es como si no estuviera: así lo guarda Tuning.nest.
@@ -245,8 +246,17 @@ Singleton {
 
     // Vuelve a lo que dice tu configuración.
     function revert(group: var): void {
+        failure = "";
         for (const change of group.changes)
             put(change.path, change.nix === undefined ? null : change.nix);
+    }
+
+    // Deshace todos los cambios aún no guardados en Nix.
+    function revertAll(): void {
+        failure = "";
+        for (const group of unsaved.slice())
+            for (const change of group.changes)
+                put(change.path, change.nix === undefined ? null : change.nix);
     }
 
     // Reconstruye en una terminal (pide la contraseña si hace falta).

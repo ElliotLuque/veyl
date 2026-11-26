@@ -117,6 +117,12 @@ Column {
             visible: root.writable && Nix.unsaved.length > 1
 
             Button {
+                icon: "arrow-counter-clockwise"
+                text: "Deshacer todo"
+                onPressed: Nix.revertAll()
+            }
+
+            Button {
                 text: Nix.busy ? "Guardando…" : "Guardar todo"
                 strong: true
                 onPressed: Nix.save(Nix.unsaved)
@@ -138,6 +144,23 @@ Column {
                 tone: Tokens.accent
                 title: modelData.title
                 text: Nix.describe(modelData).replace(/ · en Nix: .*$/, "")
+            }
+        }
+
+        Option {
+            glyph: "hammer"
+            title: "Aplicar cambios"
+            text: Nix.rebuild
+            visible: Nix.rebuild !== ""
+
+            Button {
+                icon: "hammer"
+                text: "Reconstruir"
+                strong: true
+                onPressed: {
+                    Tuning.hide();
+                    Nix.build();
+                }
             }
         }
     }

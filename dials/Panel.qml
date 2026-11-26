@@ -121,12 +121,37 @@ FocusScope {
                     Ink {
                         anchors.left: glyph.right
                         anchors.leftMargin: 12
-                        anchors.right: parent.right
-                        anchors.rightMargin: 10
+                        anchors.right: badge.visible ? badge.left : parent.right
+                        anchors.rightMargin: badge.visible ? 8 : 10
                         anchors.verticalCenter: parent.verticalCenter
                         text: entry.modelData.title
                         dim: !entry.chosen && !hit.containsMouse
                         elide: Text.ElideRight
+                    }
+
+                    // Cuántos cambios pendientes hay en Nix (sin guardar o sin reconstruir).
+                    Rectangle {
+                        id: badge
+
+                        readonly property int count: entry.modelData.id === "nix" ? Nix.drift.length : 0
+
+                        anchors.right: parent.right
+                        anchors.rightMargin: 10
+                        anchors.verticalCenter: parent.verticalCenter
+                        width: Math.max(20, badgeText.implicitWidth + 10)
+                        height: 20
+                        radius: 10
+                        color: Qt.alpha(Nix.unsaved.length > 0 ? Tokens.attention : Tokens.accent, 0.2)
+                        visible: count > 0
+
+                        Ink {
+                            id: badgeText
+                            anchors.centerIn: parent
+                            text: String(badge.count)
+                            color: Nix.unsaved.length > 0 ? Tokens.attention : Tokens.accent
+                            font.pixelSize: Tokens.tinySize
+                            strong: true
+                        }
                     }
 
                     MouseArea {
@@ -249,13 +274,18 @@ FocusScope {
             }
         }
 
-        // Al pie, con Veyl declarado en Nix, si lo que hay no coincide con
-        // tu configuración: guardarlo en ella o ir a verlo.
+        // Al pie, en Nix: siempre visible mientras haya cambios por aplicar
+        // (sin guardar en tu .nix, guardados pendientes de reconstruir, o error
+        // al guardar), salvo dentro de la propia pestaña Nix.
         Item {
             id: drift
 
-            readonly property bool shown: Nix.declared && Nix.unsaved.length > 0 && Tuning.current?.id !== "nix"
-            readonly property int count: Nix.unsaved.length
+            readonly property bool failed: Nix.failure !== ""
+            readonly property bool pendingSave: Nix.unsaved.length > 0
+            readonly property bool pendingBuild: Nix.declared && !pendingSave && Nix.unbuilt.length > 0
+            readonly property bool shown: Nix.active && Tuning.current?.id !== "nix" && (failed || pendingSave || pendingBuild)
+            readonly property int unsavedCount: Nix.unsaved.length
+            readonly property int unbuiltCount: Nix.unbuilt.length
 
             anchors.bottom: parent.bottom
             width: parent.width
@@ -277,8 +307,8 @@ FocusScope {
                 id: flake
                 x: Tokens.pad + 4
                 anchors.verticalCenter: parent.verticalCenter
-                name: "snowflake"
-                color: Tokens.attention
+                name: drift.failed ? "warning" : drift.pendingBuild ? "hammer" : "snowflake"
+                color: drift.failed || drift.pendingSave ? Tokens.attention : Tokens.accent
             }
 
             Ink {
@@ -287,7 +317,20 @@ FocusScope {
                 anchors.right: actions.left
                 anchors.rightMargin: 12
                 anchors.verticalCenter: parent.verticalCenter
-                text: drift.count === 1 ? `${Nix.unsaved[0].title}: no coincide con tu configuración de Nix` : `${drift.count} ajustes no coinciden con tu configuración de Nix`
+                color: drift.failed ? Tokens.attention : Tokens.text
+                text: {
+                    if (drift.failed)
+                        return Nix.failure;
+                    if (drift.pendingSave) {
+                        if (!Nix.declared)
+                            return drift.unsavedCount === 1 ? `${Nix.unsaved[0].title} · cambio sin declarar en Nix` : `${drift.unsavedCount} cambios sin declarar en Nix`;
+                        const extra = drift.unbuiltCount > 0 ? ` (+${drift.unbuiltCount} por reconstruir)` : "";
+                        return drift.unsavedCount === 1 ? `${Nix.unsaved[0].title} · cambio por aplicar en Nix${extra}` : `${drift.unsavedCount} cambios por aplicar en Nix${extra}`;
+                    }
+                    if (drift.pendingBuild)
+                        return drift.unbuiltCount === 1 ? "1 cambio guardado en Nix · falta reconstruir" : `${drift.unbuiltCount} cambios guardados en Nix · falta reconstruir`;
+                    return "";
+                }
                 elide: Text.ElideRight
             }
 
@@ -299,16 +342,52 @@ FocusScope {
                 spacing: 8
 
                 Button {
+                    icon: "arrow-counter-clockwise"
+                    text: "Deshacer"
+                    visible: Nix.declared && drift.pendingSave && !drift.failed
+                    onPressed: Nix.revertAll()
+                }
+
+                Button {
                     text: "Revisar"
                     onPressed: Tuning.section = "nix"
+                }
+
+                Button {
+                    icon: "arrow-square-out"
+                    text: "Abrir"
+                    visible: drift.failed && Nix.file !== ""
+                    onPressed: {
+                        Tuning.hide();
+                        Qt.openUrlExternally(`file://${Nix.file}`);
+                    }
                 }
 
                 Button {
                     icon: "floppy-disk"
                     text: Nix.busy ? "Guardando…" : "Guardar en Nix"
                     strong: true
-                    visible: Nix.file !== ""
+                    visible: Nix.declared && drift.pendingSave && !drift.failed && Nix.file !== ""
                     onPressed: Nix.save(Nix.unsaved)
+                }
+
+                Button {
+                    icon: "copy"
+                    text: "Copiar como Nix"
+                    strong: true
+                    visible: !Nix.declared && drift.pendingSave && !drift.failed
+                    onPressed: Nix.copy()
+                }
+
+                Button {
+                    icon: "hammer"
+                    text: "Reconstruir"
+                    strong: true
+                    visible: drift.pendingBuild && !drift.failed && Nix.rebuild !== ""
+                    onPressed: {
+                        Tuning.hide();
+                        Nix.build();
+                    }
                 }
             }
         }
