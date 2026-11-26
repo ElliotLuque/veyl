@@ -403,6 +403,34 @@ test('deshacer todo revierte solo los cambios sin guardar y limpia el error', ()
     assert.equal(n.Settings.quiet, true);
 });
 
+test('Nix resume el estado en vivo, la antigüedad y el tiempo transcurrido', () => {
+    const n = nix();
+    const now = 1_700_000_000_000;
+    assert.equal(n.ageText(now - 20_000, now), 'ahora');
+    assert.equal(n.ageText(now - 12 * 60_000, now), 'hace 12 min');
+    assert.equal(n.ageText(now - 3 * 3600_000, now), 'hace 3 h');
+    assert.equal(n.ageText(now - 5 * 86400_000, now), 'hace 5 d');
+    assert.equal(n.elapsedText(now - 18_000, now), '18 s');
+    assert.equal(n.elapsedText(now - 64_000, now), '1:04');
+
+    Object.assign(n, {
+        authNeeded: false, running: false, jobState: 'idle', job: null,
+        updates: [{ name: 'nixpkgs' }, { name: 'veyl' }],
+        pendingRebuild: false, lockNewer: false, unbuilt: [], rebootNeeded: false,
+        dirty: 0, flakeName: 'nixdots', checking: false, checkedAt: now,
+    });
+    assert.equal(n.summaryLine(), '2 actualizaciones: nixpkgs, veyl');
+    n.updates = [];
+    n.pendingRebuild = true;
+    n.lockNewer = true;
+    assert.equal(n.summaryLine(), 'flake.lock actualizado · falta reconstruir');
+    n.running = true;
+    n.job = { state: 'running', phase: 'Compilando…' };
+    assert.equal(n.summaryLine(), 'Compilando…');
+    n.authNeeded = true;
+    assert.equal(n.summaryLine(), 'Esperando contraseña de sudo');
+});
+
 function daemon() {
     const d = load('Daemon', {
         thinking: null, card: null, shut: null, query: '', serial: 0, connected: true, sent: [], Recall: {},

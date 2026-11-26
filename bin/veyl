@@ -55,6 +55,9 @@ uso:
                                        abre o cierra la entrada; en una vista
                                        (clipboard, outputs, inputs, schemes),
                                        o ya con algo escrito: veyl launcher = 2+2
+  veyl nix [status|check|update [<entrada>]|rebuild|upgrade|stop]
+                                       estado de NixOS / flake, comprobar actualizaciones,
+                                       actualizar entradas y reconstruir el sistema
 EOF
     exit "${1:-1}"
 }
@@ -296,6 +299,22 @@ launcher)
     clipboard | outputs | inputs | schemes) call launcher view "$1" ;;
     =) shift; call launcher type "$*" ;;
     *) call launcher type "$*" ;;
+    esac
+    ;;
+nix)
+    case "${2:-status}" in
+    status)
+        qs -p "$root" ipc call nix status 2>/dev/null || {
+            bin=$(daemon)
+            exec "$bin" nix status
+        }
+        ;;
+    check) call nix check ;;
+    update) call nix update "${3:-}" ;;
+    rebuild) call nix rebuild ;;
+    upgrade) call nix upgrade ;;
+    stop) call nix stop ;;
+    *) usage ;;
     esac
     ;;
 -h | --help | help)

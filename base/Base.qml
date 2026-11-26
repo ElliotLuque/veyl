@@ -206,14 +206,32 @@ Scope {
         // Pegada al borde de arriba, no bajo el hueco que reserva la base.
         exclusionMode: ExclusionMode.Ignore
         color: "transparent"
-        // Solo la isla recibe el puntero; lo demás lo deja pasar.
+        // Solo la isla de la hora y la de Nix reciben el puntero; lo demás lo deja pasar.
         mask: Region {
-            item: clock
+            regions: [clockArea, ...(nixPod.visible ? [nixArea] : [])]
         }
         WlrLayershell.layer: WlrLayer.Top
         WlrLayershell.namespace: "veyl-clock"
-        // El teclado, solo si se pulsa el almanaque para escribir en él.
-        WlrLayershell.keyboardFocus: root.almanac ? WlrKeyboardFocus.OnDemand : WlrKeyboardFocus.None
+        // El teclado: exclusivo si Nix pide contraseña de sudo; bajo demanda en el almanaque.
+        WlrLayershell.keyboardFocus: nixPod.typing ? WlrKeyboardFocus.Exclusive : root.almanac ? WlrKeyboardFocus.OnDemand : WlrKeyboardFocus.None
+
+        Region {
+            id: clockArea
+            item: clock
+        }
+
+        Region {
+            id: nixArea
+            item: nixPod
+        }
+
+        // Junto a la hora, colgando del borde de arriba: estado del sistema NixOS / flake.
+        NixPod {
+            id: nixPod
+            anchors.right: clock.left
+            anchors.rightMargin: Tokens.join + Tokens.gap / 2 + Tokens.gap
+            shown: root.focused && Nix.systemActive && (!root.fullscreen || Nix.authNeeded)
+        }
 
         // Superior derecha: la hora y, delante, las excepciones. Con el
         // puntero encima, el almanaque; al acercarse un evento, unos
@@ -331,7 +349,7 @@ Scope {
         right: root.fullscreen
             ? (corner.progress > 0 ? { w: corner.width, h: edge.height, corner: edge.corner } : null)
             : { w: clock.width, h: clock.height, corner: clock.corner }
-        hanging: root.fullscreen ? [] : agents.plates().map(p => Object.assign(p, { x: p.x + agents.x, join: Tokens.gap }))
+        hanging: root.fullscreen ? [] : agents.plates().map(p => Object.assign(p, { x: p.x + agents.x, join: Tokens.gap })).concat(nixPod.visible && nixPod.width > 1 && nixPod.height > 1 ? [{ x: root.modelData.width / 2 + nixPod.x, w: nixPod.width, h: nixPod.height, corner: Math.min(nixPod.height / 2, nixPod.width / 2, Tokens.round), join: Tokens.gap }] : [])
     }
 
     // En pantalla completa solo queda, en una esquina y por encima de la

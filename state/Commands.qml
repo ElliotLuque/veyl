@@ -169,6 +169,28 @@ open(sys.argv[2], "wb").write(png)
                 state: () => root.bluetooth?.enabled ? "Encendido" : "Apagado"
             }));
 
+        if (Nix.systemActive) {
+            if (Nix.rebuild !== "")
+                list.push(order("nix-rebuild", "Reconstruir el sistema", "Nix", "hammer", "system-rebuild nh os switch nixos rebuild reconstruir aplicar configuracion", () => Nix.rebuildSystem(), {
+                    state: () => Nix.running ? (Nix.job?.phase || "En marcha…") : Nix.pendingRebuild ? "Pendiente" : Nix.generation > 0 ? `#${Nix.generation}` : ""
+                }));
+            if (Nix.flake !== "") {
+                list.push(order("nix-update", "Actualizar flake", "Nix", "arrows-clockwise", "nix flake update actualizar paquetes entradas inputs nixdots", () => Nix.updateFlake(""), {
+                    state: () => Nix.updates.length > 0 ? `${Nix.updates.length} act.` : Nix.checkedAt > 0 ? "Al día" : ""
+                }));
+                if (Nix.rebuild !== "")
+                    list.push(order("nix-upgrade", "Actualizar flake y reconstruir", "Nix", "sparkle", "nix flake update system-rebuild rebuild upgrade actualizar todo sistema", () => Nix.upgradeSystem(), {
+                        state: () => Nix.updates.length > 0 ? `${Nix.updates.length} act.` : ""
+                    }));
+                list.push(order("nix-check", "Comprobar actualizaciones de Nix", "Nix", "magnifying-glass", "nix updates check comprobar paquetes flake actualizaciones", () => Nix.checkUpdates(), {
+                    state: () => Nix.checking ? "Comprobando…" : Nix.updates.length > 0 ? `${Nix.updates.length} act.` : ""
+                }));
+                list.push(order("nix-terminal", "Abrir flake en la terminal", "Nix", "terminal", "nixdots dotfiles flake terminal nix carpeta", () => Nix.openFlakeTerminal()));
+            }
+            if (Nix.running && !(Nix.job?.external ?? false))
+                list.push(order("nix-stop", "Detener operación de Nix", "Nix", "x-circle", "parar cancelar stop rebuild flake update", () => Nix.stopJob()));
+        }
+
         list.push(order("lock", "Bloquear la pantalla", "Sesión", "lock", "lock candado", () => Lock.lock()));
         if (has("systemctl"))
             list.push(order("suspend", "Suspender", "Sesión", "moon", "dormir sleep suspend", () => root.shell("systemctl suspend")));

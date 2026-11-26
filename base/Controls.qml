@@ -1267,6 +1267,120 @@ Item {
                     }
                 }
 
+                // NixOS / Flake: generación, actualizaciones y botones de flake update / rebuild.
+                Card {
+                    width: parent.width
+                    height: nixCard.height + 10
+                    visible: Nix.systemActive
+
+                    Column {
+                        id: nixCard
+                        x: 6
+                        y: 2
+                        width: parent.width - 12
+                        spacing: 6
+
+                        Heading {
+                            text: Nix.generation > 0 ? `NixOS · #${Nix.generation}` : (Nix.flakeName ? `Nix · ${Nix.flakeName}` : "Nix")
+
+                            Round {
+                                anchors.verticalCenter: parent.verticalCenter
+                                icon: "arrows-clockwise"
+                                tint: Nix.checking ? Tokens.accent : Tokens.dim
+                                visible: Nix.flake !== ""
+                                onTapped: Nix.checkUpdates()
+                            }
+
+                            Round {
+                                anchors.verticalCenter: parent.verticalCenter
+                                icon: "gear-six"
+                                onTapped: {
+                                    Tuning.origin = Qt.size(root.width, root.height);
+                                    Tuning.show("", "nix");
+                                    root.done();
+                                }
+                            }
+                        }
+
+                        Item {
+                            width: parent.width
+                            height: 36
+
+                            Icon {
+                                id: nixGlyph
+                                x: 10
+                                anchors.verticalCenter: parent.verticalCenter
+                                name: Nix.authNeeded ? "lock" : Nix.jobState === "error" ? "warning" : Nix.jobState === "done" ? "check-circle" : "snowflake"
+                                color: Nix.authNeeded || Nix.rebootNeeded ? Tokens.attention : Nix.jobState === "error" ? Tokens.critical : Nix.jobState === "done" ? Tokens.done : (Nix.running || Nix.updates.length > 0 || Nix.pendingRebuild) ? Tokens.accent : Tokens.dim
+                            }
+
+                            Column {
+                                anchors.left: nixGlyph.right
+                                anchors.leftMargin: 12
+                                anchors.right: nixActions.left
+                                anchors.rightMargin: 10
+                                anchors.verticalCenter: parent.verticalCenter
+                                spacing: 1
+
+                                Ink {
+                                    width: parent.width
+                                    text: Nix.summaryLine()
+                                    color: Nix.authNeeded ? Tokens.attention : Nix.jobState === "error" ? Tokens.critical : Tokens.text
+                                    elide: Text.ElideRight
+                                }
+
+                                Ink {
+                                    width: parent.width
+                                    text: [Nix.flakeName, Nix.version, Nix.checkedAt > 0 ? `comprobado ${Nix.ageText(Nix.checkedAt, root.clock)}` : ""].filter(p => p).join(" · ")
+                                    dim: true
+                                    font.pixelSize: Tokens.tinySize
+                                    elide: Text.ElideRight
+                                    visible: text !== ""
+                                }
+                            }
+
+                            Row {
+                                id: nixActions
+                                anchors.right: parent.right
+                                anchors.rightMargin: 6
+                                anchors.verticalCenter: parent.verticalCenter
+                                spacing: 6
+
+                                Chip {
+                                    icon: "x-circle"
+                                    text: "Detener"
+                                    base: Tokens.bg
+                                    visible: Nix.running && !(Nix.job?.external ?? false)
+                                    onTapped: Nix.stopJob()
+                                }
+
+                                Chip {
+                                    icon: "arrows-clockwise"
+                                    text: "Actualizar"
+                                    base: Tokens.bg
+                                    visible: !Nix.running && Nix.flake !== ""
+                                    onTapped: {
+                                        Nix.updateFlake("");
+                                        root.done();
+                                    }
+                                }
+
+                                Chip {
+                                    icon: "hammer"
+                                    text: "Reconstruir"
+                                    base: Tokens.bg
+                                    lit: Nix.pendingRebuild || Nix.dirty > 0
+                                    visible: !Nix.running && Nix.rebuild !== ""
+                                    onTapped: {
+                                        Nix.rebuildSystem();
+                                        root.done();
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
                 // Al pie: los atajos sobre la pantalla y la sesión. Lo que dice
                 // el botón bajo el puntero, o lo que espera una segunda
                 // pulsación, sale junto a la sesión: nada se mueve bajo el puntero.

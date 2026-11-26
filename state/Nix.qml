@@ -4,13 +4,14 @@ import QtQuick
 import Quickshell
 import Quickshell.Io
 
-// Veyl declarado en Nix (programs.veyl, en nix/). Los módulos dejan un
-// manifiesto con lo declarado y dónde se declaró; aquí se aplica lo
-// declarado cada vez que cambia (al reconstruir, aunque Veyl esté en
-// marcha) y se compara con lo que hay: lo que se cambia en los ajustes y no
-// coincide con tu configuración se puede guardar en ella (lo escribe veyld,
-// en el mismo archivo y sin tocar lo demás) o deshacer, para que lo que ves
-// y lo que tienes escrito no se separen.
+// Nix y NixOS en Veyl:
+// 1. Si Veyl está declarado con su módulo (`programs.veyl`, en nix/), aplica lo
+//    declarado al reconstruir y compara con los ajustes actuales para guardarlos
+//    o deshacerlos en tu configuración.
+// 2. En sistemas NixOS o con flake, mantiene el estado en vivo que manda veyld:
+//    generación actual, cambios locales en el flake, actualizaciones pendientes
+//    de las entradas de `flake.lock`, reconstrucción/actualización en marcha y
+//    contraseña de sudo integrada en la isla.
 Singleton {
     id: root
 
@@ -22,15 +23,42 @@ Singleton {
     readonly property bool declared: used !== null
     readonly property var settings: used?.settings ?? {}
 
-    // Lo que cuenta veyld: { nixos, declared, file, files, error, rebuild }.
+    // Lo que cuenta `veyld nix status`: { nixos, declared, file, files, error, rebuild }.
     property var status: ({})
-    readonly property bool nixos: status.nixos === true
-    // Solo se enseña Nix (sección, insignia y pie) si Veyl está declarado con su módulo.
+    // Lo que manda el hilo de Nix de veyld por el socket en vivo.
+    property var live: ({})
+
+    readonly property bool nixos: live.nixos === true || status.nixos === true
+    // Interfaz de ajustes declarados (pie de cambios por aplicar): solo con módulo de Nix.
     readonly property bool active: declared
+    // Islas, centro de control, órdenes y sección de sistema/flake: en NixOS o con flake/módulo.
+    readonly property bool systemActive: declared || nixos || flake !== ""
     readonly property string file: status.file ?? ""
     readonly property var files: status.files ?? (file ? [file] : [])
     readonly property string problem: status.error ?? ""
-    readonly property string rebuild: status.rebuild ?? used?.rebuild ?? ""
+    readonly property string flake: live.flake || used?.flake || ""
+    readonly property string flakeName: live.flakeName || (flake ? flake.split("/").filter(part => part).pop() ?? "" : "")
+    readonly property string rebuild: live.rebuild || status.rebuild || used?.rebuild || ""
+    readonly property int generation: live.generation ?? 0
+    readonly property string version: live.version ?? ""
+    readonly property double builtAt: live.builtAt ?? 0
+    readonly property bool rebootNeeded: live.rebootNeeded === true
+    readonly property int dirty: live.dirty ?? 0
+    readonly property double lockModified: live.lockModified ?? 0
+    readonly property bool lockNewer: live.lockNewer === true
+    readonly property double nixpkgsAge: live.nixpkgsAge ?? 0
+    readonly property int inputsCount: live.inputsCount ?? 0
+    readonly property bool checking: live.checking === true
+    readonly property double checkedAt: live.checkedAt ?? 0
+    readonly property var updates: live.updates ?? []
+    readonly property string checkError: live.checkError ?? ""
+    readonly property var job: live.job ?? null
+    readonly property string jobState: job?.state ?? "idle"
+    readonly property bool running: jobState === "running"
+    readonly property var auth: live.auth ?? null
+    readonly property bool authNeeded: auth !== null
+    readonly property bool pendingRebuild: lockNewer || unbuilt.length > 0
+    readonly property bool needsAttention: authNeeded || jobState === "error"
     property bool busy: false
     property string failure: ""
 
@@ -154,6 +182,56 @@ Singleton {
         return group.changes.map(change => change.path.slice(1).join(".") || change.path[0]).join(", ");
     }
 
+    // Cuánto hace, en corto: «ahora», «hace 12 min», «hace 3 h», «hace 4 d».
+    function ageText(at: double, now: double): string {
+        if (!at || at <= 0)
+            return "";
+        const minutes = Math.max(0, Math.floor((now - at) / 60000));
+        if (minutes < 1)
+            return "ahora";
+        if (minutes < 60)
+            return `hace ${minutes} min`;
+        if (minutes < 1440)
+            return `hace ${Math.floor(minutes / 60)} h`;
+        return `hace ${Math.floor(minutes / 1440)} d`;
+    }
+
+    // Cuánto lleva una operación en marcha: «18 s», «1:04».
+    function elapsedText(since: double, now: double): string {
+        if (!since || since <= 0)
+            return "";
+        const seconds = Math.max(0, Math.floor((now - since) / 1000));
+        if (seconds < 60)
+            return `${seconds} s`;
+        const mins = Math.floor(seconds / 60);
+        const rem = seconds % 60;
+        return `${mins}:${rem < 10 ? "0" : ""}${rem}`;
+    }
+
+    // Resumen en una línea para el centro de control y las órdenes.
+    function summaryLine(): string {
+        if (authNeeded)
+            return "Esperando contraseña de sudo";
+        if (running)
+            return job?.phase || "En marcha…";
+        if (jobState === "error")
+            return job?.summary || "Falló la última operación";
+        if (updates.length > 0) {
+            const names = updates.slice(0, 3).map(u => u.name).join(", ");
+            const rest = updates.length > 3 ? ` y ${updates.length - 3} más` : "";
+            return `${updates.length} ${updates.length === 1 ? "actualización" : "actualizaciones"}: ${names}${rest}`;
+        }
+        if (pendingRebuild)
+            return lockNewer ? "flake.lock actualizado · falta reconstruir" : `${unbuilt.length} ajustes guardados · falta reconstruir`;
+        if (rebootNeeded)
+            return "Kernel nuevo · reinicia para aplicarlo";
+        if (dirty > 0)
+            return `${dirty} ${dirty === 1 ? "archivo modificado" : "archivos modificados"} en ${flakeName || "flake"}`;
+        if (checking)
+            return "Comprobando actualizaciones…";
+        return checkedAt > 0 ? "Al día" : (flakeName || "NixOS");
+    }
+
     // Pone una hoja (o la quita, con null: vuelve a lo de fábrica).
     function put(path: var, value: var): void {
         const key = path[0];
@@ -208,6 +286,16 @@ Singleton {
         memory.written = {};
     }
 
+    function told(data: var): void {
+        live = data ?? ({});
+    }
+
+    function disconnected(): void {
+        if (!live || typeof live !== "object")
+            return;
+        live = Object.assign({}, live, { auth: null, checking: false, job: live.job?.state === "running" ? null : live.job });
+    }
+
     function veyld(args: var, done: var): void {
         Host.ask(["sh", "-c", 'bin=$(command -v veyld || echo "$1/veyld/target/release/veyld"); shift; exec "$bin" nix "$@"', "sh", Quickshell.shellDir].concat(args), done);
     }
@@ -236,6 +324,54 @@ Singleton {
             queryStatus();
         else
             status = {};
+        refreshSystem();
+    }
+
+    function refreshSystem(): void {
+        if (Daemon.connected)
+            Daemon.send({ nix: { op: "refresh" } });
+    }
+
+    function checkUpdates(): void {
+        if (Daemon.connected)
+            Daemon.send({ nix: { op: "check" } });
+    }
+
+    function updateFlake(input: string): void {
+        if (Daemon.connected)
+            Daemon.send({ nix: { op: "update", input: input ?? "" } });
+    }
+
+    function rebuildSystem(): void {
+        if (Daemon.connected)
+            Daemon.send({ nix: { op: "rebuild" } });
+        else
+            build();
+    }
+
+    function upgradeSystem(): void {
+        if (Daemon.connected)
+            Daemon.send({ nix: { op: "upgrade" } });
+    }
+
+    function stopJob(): void {
+        if (Daemon.connected)
+            Daemon.send({ nix: { op: "stop" } });
+    }
+
+    function dismissJob(): void {
+        if (Daemon.connected)
+            Daemon.send({ nix: { op: "dismiss" } });
+    }
+
+    function submitAuth(password: string): void {
+        if (Daemon.connected)
+            Daemon.send({ nix: { op: "auth", password } });
+    }
+
+    function cancelAuth(): void {
+        if (Daemon.connected)
+            Daemon.send({ nix: { op: "auth_cancel" } });
     }
 
     // Escribe en tu configuración lo de estos grupos.
@@ -273,11 +409,22 @@ Singleton {
                 put(change.path, change.nix === undefined ? null : change.nix);
     }
 
-    // Reconstruye en una terminal (pide la contraseña si hace falta).
+    // Reconstruye en una terminal (útil si quieres seguir toda la salida interactiva).
     function build(): void {
         if (!rebuild)
             return;
         Quickshell.execDetached([Apps.terminal, "-e", "sh", "-c", `${rebuild}; status=$?; echo; printf 'Intro para cerrar'; read -r _; exit $status`]);
+    }
+
+    function openFlakeTerminal(): void {
+        if (!flake)
+            return;
+        Quickshell.execDetached(["sh", "-c", 'cd "$1" && exec "$2"', "sh", flake, Apps.terminal]);
+    }
+
+    function openLog(): void {
+        if (job?.logFile)
+            Qt.openUrlExternally(`file://${job.logFile}`);
     }
 
     // Sin Veyl en tu configuración: cómo se escribiría lo que tienes, al portapapeles.
@@ -366,6 +513,46 @@ Singleton {
 
             property string applied: ""
             property var written: ({})
+        }
+    }
+
+    IpcHandler {
+        target: "nix"
+
+        function status(): string {
+            return JSON.stringify(root.live);
+        }
+
+        function check(): string {
+            if (!root.flake)
+                return "no se encontró ningún flake";
+            root.checkUpdates();
+            return "";
+        }
+
+        function update(input: string): string {
+            if (!root.flake)
+                return "no se encontró ningún flake";
+            root.updateFlake(input);
+            return "";
+        }
+
+        function rebuild(): string {
+            if (!root.rebuild)
+                return "no hay orden de reconstrucción configurada";
+            root.rebuildSystem();
+            return "";
+        }
+
+        function upgrade(): string {
+            if (!root.flake || !root.rebuild)
+                return "falta el flake o la orden de reconstrucción";
+            root.upgradeSystem();
+            return "";
+        }
+
+        function stop(): void {
+            root.stopJob();
         }
     }
 }

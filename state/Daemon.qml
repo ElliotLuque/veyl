@@ -180,6 +180,8 @@ Singleton {
             asked = asked.filter(row => row.id !== message.asked_gone);
         if (message.calendar !== undefined)
             Agenda.told(message.calendar);
+        if (message.nix !== undefined)
+            Nix.told(message.nix);
         if (message.thinking !== undefined) {
             const was = thinking;
             thinking = message.thinking;
@@ -284,6 +286,7 @@ Singleton {
             asked = [];
             awake = [];
             Notifications.load([]);
+            Nix.disconnected();
         }
     }
 

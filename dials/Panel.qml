@@ -129,11 +129,11 @@ FocusScope {
                         elide: Text.ElideRight
                     }
 
-                    // Cuántos cambios pendientes hay en Nix (sin guardar o sin reconstruir).
+                    // Cuántos cambios pendientes o actualizaciones hay en Nix.
                     Rectangle {
                         id: badge
 
-                        readonly property int count: entry.modelData.id === "nix" && Nix.active ? Nix.drift.length : 0
+                        readonly property int count: entry.modelData.id === "nix" && Nix.systemActive ? (Nix.active ? Nix.drift.length : 0) + Nix.updates.length : 0
 
                         anchors.right: parent.right
                         anchors.rightMargin: 10
@@ -141,14 +141,14 @@ FocusScope {
                         width: Math.max(20, badgeText.implicitWidth + 10)
                         height: 20
                         radius: 10
-                        color: Qt.alpha(Nix.unsaved.length > 0 ? Tokens.attention : Tokens.accent, 0.2)
+                        color: Qt.alpha(Nix.active && Nix.unsaved.length > 0 ? Tokens.attention : Tokens.accent, 0.2)
                         visible: count > 0
 
                         Ink {
                             id: badgeText
                             anchors.centerIn: parent
                             text: String(badge.count)
-                            color: Nix.unsaved.length > 0 ? Tokens.attention : Tokens.accent
+                            color: Nix.active && Nix.unsaved.length > 0 ? Tokens.attention : Tokens.accent
                             font.pixelSize: Tokens.tinySize
                             strong: true
                         }

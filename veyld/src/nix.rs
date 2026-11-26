@@ -15,15 +15,31 @@
 //! que no está se añade en el bloque más hondo que ya exista, con su sangría.
 //! Lo que calcula una expresión no se pisa.
 
-use std::fs;
+use std::collections::{HashMap, VecDeque};
+use std::fs::{self, File};
+use std::io::{BufRead, BufReader, Read, Write};
+use std::os::unix::fs::PermissionsExt;
+use std::os::unix::net::UnixStream;
+use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
+use std::process::{Command, Stdio};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
+use std::sync::{Arc, Mutex};
+use std::thread;
+use std::time::{Duration, Instant, UNIX_EPOCH};
 
+use ring::rand::{SecureRandom, SystemRandom};
 use rnix::ast::{self, HasEntry};
 use rnix::{TextRange, TextSize};
 use rowan::ast::AstNode;
+use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value, json};
 
 use crate::config;
+use crate::daemon::{Event, now};
+use crate::process;
+use crate::procs;
 
 /// El manifiesto que dejan los módulos de Nix, y dónde estaba.
 pub fn manifest() -> Option<(PathBuf, Value)> {
@@ -62,10 +78,48 @@ fn roots(manifest: &Value) -> Vec<PathBuf> {
         }
     }
     push("/etc/nixos");
-    for dir in [".config/home-manager", ".config/nixos", ".config/nix-config"] {
+    for dir in ["dotfiles/nixdots", "nixdots", ".config/nixos", ".config/home-manager", ".config/nix-config", "dotfiles"] {
         push(&config::home().join(dir).to_string_lossy());
     }
     roots
+}
+
+/// La primera carpeta de flake encontrada (que tenga `flake.nix`).
+pub fn flake_dir(manifest: Option<&Value>) -> Option<PathBuf> {
+    let empty = Value::Null;
+    roots(manifest.unwrap_or(&empty)).into_iter().find(|dir| dir.join("flake.nix").is_file())
+}
+
+fn find_in_path(program: &str) -> Option<PathBuf> {
+    let path = std::env::var_os("PATH")?;
+    for dir in std::env::split_paths(&path) {
+        let full = dir.join(program);
+        if full.is_file() && fs::metadata(&full).is_ok_and(|m| m.permissions().mode() & 0o111 != 0) {
+            return Some(full);
+        }
+    }
+    None
+}
+
+/// La orden por defecto para reconstruir el sistema (la del manifiesto o la que toque).
+pub fn default_rebuild(manifest: Option<&Value>, flake: Option<&Path>) -> String {
+    if let Some(cmd) = manifest.and_then(|m| m.get("rebuild")).and_then(Value::as_str).map(str::trim).filter(|s| !s.is_empty()) {
+        return cmd.to_string();
+    }
+    let has_nh = find_in_path("nh").is_some();
+    let flake_arg = flake.map(|p| p.to_string_lossy().to_string());
+    if nixos() {
+        match (has_nh, flake_arg) {
+            (true, Some(f)) => format!("nh os switch {f}"),
+            (true, None) => "nh os switch".into(),
+            (false, Some(f)) => format!("sudo nixos-rebuild switch --flake {f}"),
+            (false, None) => "sudo nixos-rebuild switch".into(),
+        }
+    } else if let Some(f) = flake_arg {
+        if has_nh { format!("nh home switch {f}") } else { format!("home-manager switch --flake {f}") }
+    } else {
+        String::new()
+    }
 }
 
 /// Una ruta que viene del sistema de módulos puede llevar anotaciones al final
@@ -545,7 +599,7 @@ fn insert(text: &str, set: &ast::AttrSet, path: &str, value: &Value) -> String {
     out
 }
 
-/// `veyld nix …`: lo que pide Veyl desde los ajustes.
+/// `veyld nix …`: lo que pide Veyl desde los ajustes o para el sistema.
 pub fn cli(args: &[String]) -> Result<(), String> {
     match args.first().map(String::as_str) {
         None | Some("status") => {
@@ -567,7 +621,1168 @@ pub fn cli(args: &[String]) -> Result<(), String> {
             print!("{}", snippet(settings.as_object().ok_or("se esperaba un objeto")?));
             Ok(())
         }
-        Some(other) => Err(format!("no sé qué es «{other}»: status, write o show")),
+        // `veyld nix check`: comprueba actualizaciones de las entradas del flake.
+        Some("check") => {
+            let manifest = manifest().map(|(_, v)| v);
+            let flake = flake_dir(manifest.as_ref()).ok_or("no encuentro ningún flake")?;
+            let cache = check_updates(&flake)?;
+            println!("{}", serde_json::to_string_pretty(&cache).map_err(|e| e.to_string())?);
+            Ok(())
+        }
+        // `veyld nix askpass [<prompt>]`: usado como SUDO_ASKPASS durante un rebuild desde Veyl.
+        Some("askpass") => askpass_cli(args.get(1).map(String::as_str).unwrap_or("Contraseña de sudo")),
+        Some(other) => Err(format!("no sé qué es «{other}»: status, write, show, check o askpass")),
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Estado del sistema NixOS, actualizaciones del flake y reconstrucción en vivo
+// ---------------------------------------------------------------------------
+
+/// Cada cuánto se comprueban automáticamente las actualizaciones del flake.
+const AUTO_CHECK_EVERY: Duration = Duration::from_secs(3 * 60 * 60);
+/// Cada cuánto se revisa el estado local (generación, flake.lock, procesos).
+const LOCAL_POLL_EVERY: Duration = Duration::from_secs(10);
+/// Cuánto puede tardar una reconstrucción o actualización como mucho.
+const JOB_TIMEOUT: Duration = Duration::from_secs(60 * 60);
+/// Cuántas líneas de salida se mandan al shell (el resto va al archivo de log).
+const LOG_TAIL: usize = 12;
+
+fn mtime_ms(path: &Path) -> i64 {
+    fs::symlink_metadata(path)
+        .or_else(|_| fs::metadata(path))
+        .and_then(|m| m.modified())
+        .ok()
+        .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
+        .map(|d| d.as_millis() as i64)
+        .unwrap_or(0)
+}
+
+/// Extrae el número de generación de `system-827-link` → `827`.
+pub fn parse_generation_link(target: &str) -> Option<u32> {
+    let name = Path::new(target).file_name()?.to_str()?;
+    let rest = name.strip_prefix("system-")?.strip_suffix("-link")?;
+    rest.parse().ok()
+}
+
+/// Extrae la versión de NixOS de `/nix/store/…-nixos-system-host-26.11.20261121.2786a2a`.
+pub fn parse_system_version(target: &str) -> Option<String> {
+    let name = Path::new(target).file_name()?.to_str()?;
+    let after = name.split_once("nixos-system-")?.1;
+    // Busca el tramo `YY.MM...` al final del nombre.
+    for (idx, part) in after.match_indices('.') {
+        if idx >= 2 {
+            let prefix = &after[idx - 2..idx];
+            if prefix.chars().all(|c| c.is_ascii_digit()) && (idx == 2 || after.as_bytes()[idx - 3] == b'-') {
+                let tail = &after[idx - 2..];
+                let parts: Vec<&str> = tail.split('.').collect();
+                if parts.len() >= 3 && parts[1].chars().all(|c| c.is_ascii_digit()) {
+                    return Some(format!("{}.{}.{}", parts[0], parts[1], parts[2]));
+                }
+                if parts.len() >= 2 && parts[1].chars().all(|c| c.is_ascii_digit()) {
+                    return Some(format!("{}.{}", parts[0], parts[1]));
+                }
+            }
+        }
+        let _ = part;
+    }
+    None
+}
+
+/// Si el kernel del sistema activo difiere del que arrancó la máquina.
+fn reboot_needed() -> bool {
+    let Ok(booted) = fs::canonicalize("/run/booted-system/kernel") else {
+        return false;
+    };
+    let Ok(current) = fs::canonicalize("/run/current-system/kernel") else {
+        return false;
+    };
+    booted != current
+}
+
+/// Una entrada directa y flotante de `flake.lock` (sin `rev` fijado a mano).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct FlakeInput {
+    pub name: String,
+    pub url: String,
+    pub refspec: String,
+    pub branch: String,
+    pub locked_rev: String,
+    pub last_modified: i64,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdateInfo {
+    pub name: String,
+    pub branch: String,
+    pub current_rev: String,
+    pub remote_rev: String,
+    pub last_modified: i64,
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdatesCache {
+    pub flake: String,
+    pub checked_at: i64,
+    pub lock_modified: i64,
+    pub checked_count: usize,
+    pub updates: Vec<UpdateInfo>,
+    #[serde(default)]
+    pub error: String,
+}
+
+fn cache_path() -> PathBuf {
+    config::state().join("nix-updates.json")
+}
+
+pub fn log_path() -> PathBuf {
+    config::state().join("nix-last.log")
+}
+
+/// Lee las entradas flotantes directas de `flake.lock` y la fecha de `nixpkgs`.
+pub fn parse_lock_inputs(text: &str) -> (Vec<FlakeInput>, usize, i64) {
+    let Ok(json) = serde_json::from_str::<Value>(text) else {
+        return (Vec::new(), 0, 0);
+    };
+    let Some(nodes) = json.get("nodes").and_then(Value::as_object) else {
+        return (Vec::new(), 0, 0);
+    };
+    let root_name = json.get("root").and_then(Value::as_str).unwrap_or("root");
+    let Some(root_inputs) = nodes.get(root_name).and_then(|n| n.get("inputs")).and_then(Value::as_object) else {
+        return (Vec::new(), 0, 0);
+    };
+    let total = root_inputs.len();
+    let mut nixpkgs_modified = 0i64;
+    let mut out = Vec::new();
+    for (name, target) in root_inputs {
+        let Some(node_key) = target.as_str() else {
+            continue;
+        };
+        let Some(node) = nodes.get(node_key) else {
+            continue;
+        };
+        let locked = node.get("locked");
+        let last_modified = locked.and_then(|l| l.get("lastModified")).and_then(Value::as_i64).unwrap_or(0) * 1000;
+        if name == "nixpkgs" {
+            nixpkgs_modified = last_modified;
+        }
+        let Some(orig) = node.get("original").and_then(Value::as_object) else {
+            continue;
+        };
+        // Una revisión fijada a mano (`rev`) no flota.
+        if orig.get("rev").and_then(Value::as_str).is_some_and(|s| !s.is_empty()) {
+            continue;
+        }
+        let Some(locked_rev) = locked.and_then(|l| l.get("rev")).and_then(Value::as_str).filter(|s| !s.is_empty()) else {
+            continue;
+        };
+        let kind = orig.get("type").and_then(Value::as_str).unwrap_or("");
+        let url = match kind {
+            "github" => {
+                let (Some(owner), Some(repo)) = (orig.get("owner").and_then(Value::as_str), orig.get("repo").and_then(Value::as_str)) else {
+                    continue;
+                };
+                let host = orig.get("host").and_then(Value::as_str).unwrap_or("github.com");
+                format!("https://{host}/{owner}/{repo}.git")
+            }
+            "gitlab" => {
+                let (Some(owner), Some(repo)) = (orig.get("owner").and_then(Value::as_str), orig.get("repo").and_then(Value::as_str)) else {
+                    continue;
+                };
+                let host = orig.get("host").and_then(Value::as_str).unwrap_or("gitlab.com");
+                format!("https://{host}/{owner}/{repo}.git")
+            }
+            "sourcehut" => {
+                let (Some(owner), Some(repo)) = (orig.get("owner").and_then(Value::as_str), orig.get("repo").and_then(Value::as_str)) else {
+                    continue;
+                };
+                let host = orig.get("host").and_then(Value::as_str).unwrap_or("git.sr.ht");
+                format!("https://{host}/{owner}/{repo}")
+            }
+            "git" => {
+                let Some(u) = orig.get("url").and_then(Value::as_str) else {
+                    continue;
+                };
+                if !(u.starts_with("https://") || u.starts_with("http://") || u.starts_with("ssh://") || u.starts_with("git@")) {
+                    continue;
+                }
+                u.to_string()
+            }
+            _ => continue,
+        };
+        let branch = orig.get("ref").and_then(Value::as_str).unwrap_or("").to_string();
+        // Si trae `ref`, solo miramos `refs/heads/<ref>` para ignorar etiquetas fijas (`v0.9.3`).
+        let refspec = if branch.is_empty() { "HEAD".to_string() } else { format!("refs/heads/{branch}") };
+        out.push(FlakeInput { name: name.clone(), url, refspec, branch, locked_rev: locked_rev.to_string(), last_modified });
+    }
+    (out, total, nixpkgs_modified)
+}
+
+fn input_rank(name: &str) -> (u8, &str) {
+    match name {
+        "nixpkgs" => (0, name),
+        "home-manager" => (1, name),
+        "veyl" => (2, name),
+        _ => (3, name),
+    }
+}
+
+fn ls_remote(url: &str, refspec: &str) -> Option<String> {
+    let mut cmd = Command::new("git");
+    cmd.args(["-c", "credential.helper=", "ls-remote", url, refspec]).env("GIT_TERMINAL_PROMPT", "0");
+    let out = process::output(&mut cmd, b"", Duration::from_secs(12)).ok()?;
+    if !out.status.success() {
+        return None;
+    }
+    let text = String::from_utf8_lossy(&out.stdout);
+    let sha = text.lines().next()?.split_whitespace().next()?;
+    (sha.len() == 40 && sha.bytes().all(|b| b.is_ascii_hexdigit())).then(|| sha.to_string())
+}
+
+/// Comprueba en paralelo qué entradas directas del flake tienen commits nuevos.
+pub fn check_updates(flake: &Path) -> Result<UpdatesCache, String> {
+    let lock_path = flake.join("flake.lock");
+    let text = fs::read_to_string(&lock_path).map_err(|e| format!("{}: {e}", lock_path.display()))?;
+    let lock_modified = mtime_ms(&lock_path);
+    let (inputs, _, _) = parse_lock_inputs(&text);
+    let checked_count = inputs.len();
+
+    let queue = Arc::new(Mutex::new(VecDeque::from(inputs)));
+    let results = Arc::new(Mutex::new(Vec::<UpdateInfo>::new()));
+    let workers = checked_count.clamp(1, 6);
+    let mut handles = Vec::with_capacity(workers);
+    for _ in 0..workers {
+        let queue = Arc::clone(&queue);
+        let results = Arc::clone(&results);
+        handles.push(thread::spawn(move || {
+            loop {
+                let item = {
+                    let mut q = queue.lock().unwrap_or_else(|e| e.into_inner());
+                    q.pop_front()
+                };
+                let Some(input) = item else {
+                    break;
+                };
+                if let Some(remote_rev) = ls_remote(&input.url, &input.refspec)
+                    && remote_rev != input.locked_rev
+                {
+                    let mut res = results.lock().unwrap_or_else(|e| e.into_inner());
+                    res.push(UpdateInfo {
+                        name: input.name,
+                        branch: input.branch,
+                        current_rev: input.locked_rev,
+                        remote_rev,
+                        last_modified: input.last_modified,
+                    });
+                }
+            }
+        }));
+    }
+    for handle in handles {
+        let _ = handle.join();
+    }
+    let mut updates = results.lock().unwrap_or_else(|e| e.into_inner()).clone();
+    updates.sort_by(|a, b| input_rank(&a.name).cmp(&input_rank(&b.name)));
+    let cache = UpdatesCache { flake: flake.to_string_lossy().to_string(), checked_at: now(), lock_modified, checked_count, updates, error: String::new() };
+    save_updates_cache(&cache);
+    Ok(cache)
+}
+
+fn load_updates_cache(flake: &Path) -> Option<UpdatesCache> {
+    let text = fs::read_to_string(cache_path()).ok()?;
+    let mut cache: UpdatesCache = serde_json::from_str(&text).ok()?;
+    if cache.flake != flake.to_string_lossy() {
+        return None;
+    }
+    reconcile_updates(flake, &mut cache);
+    Some(cache)
+}
+
+fn save_updates_cache(cache: &UpdatesCache) {
+    let path = cache_path();
+    if let Some(parent) = path.parent() {
+        let _ = fs::create_dir_all(parent);
+    }
+    if let Ok(text) = serde_json::to_string_pretty(cache) {
+        let _ = fs::write(&path, text);
+    }
+}
+
+/// Si `flake.lock` cambió (p. ej. tras un `nix flake update`), saca de la lista
+/// de pendientes las entradas cuyo `rev` ya cambió.
+pub fn reconcile_updates(flake: &Path, cache: &mut UpdatesCache) {
+    let lock_path = flake.join("flake.lock");
+    let current_mtime = mtime_ms(&lock_path);
+    if current_mtime == 0 || current_mtime == cache.lock_modified {
+        return;
+    }
+    let Ok(text) = fs::read_to_string(&lock_path) else {
+        return;
+    };
+    let (inputs, _, _) = parse_lock_inputs(&text);
+    let revs: HashMap<String, String> = inputs.into_iter().map(|i| (i.name, i.locked_rev)).collect();
+    cache.updates.retain(|u| revs.get(&u.name).is_some_and(|rev| rev == &u.current_rev && rev != &u.remote_rev));
+    cache.lock_modified = current_mtime;
+}
+
+/// Quita secuencias ANSI y se queda con el último tramo tras `\r`.
+pub fn strip_ansi(raw: &str) -> String {
+    let mut out = String::with_capacity(raw.len());
+    let mut chars = raw.chars().peekable();
+    while let Some(c) = chars.next() {
+        if c == '\x1b' {
+            match chars.peek().copied() {
+                Some('[') => {
+                    chars.next();
+                    for ch in chars.by_ref() {
+                        if ('@'..='~').contains(&ch) {
+                            break;
+                        }
+                    }
+                }
+                Some(']') => {
+                    chars.next();
+                    while let Some(ch) = chars.next() {
+                        if ch == '\x07' || (ch == '\x1b' && chars.peek() == Some(&'\\')) {
+                            if ch == '\x1b' {
+                                chars.next();
+                            }
+                            break;
+                        }
+                    }
+                }
+                _ => {}
+            }
+        } else if c == '\r' {
+            out.clear();
+        } else if !c.is_control() || c == '\t' {
+            out.push(c);
+        }
+    }
+    out.trim().to_string()
+}
+
+/// Traduce una línea de salida de Nix / nh a una fase legible.
+pub fn parse_phase(kind: &str, line: &str) -> Option<&'static str> {
+    let lower = line.to_lowercase();
+    if kind == "update" {
+        if lower.contains("updated input") {
+            return Some("Actualizando entradas…");
+        }
+        if lower.contains("fetching") || lower.contains("unpacking") || lower.contains("downloading") {
+            return Some("Descargando entradas…");
+        }
+        return None;
+    }
+    if lower.contains("activating")
+        || lower.contains("setting up /etc")
+        || lower.contains("reloading user units")
+        || lower.contains("starting the following units")
+        || lower.contains("switching")
+    {
+        return Some("Activando…");
+    }
+    if lower.contains("comparing changes") || lower.contains("upgraded packages") || lower.contains("added packages") || line.starts_with("<<< ") {
+        return Some("Comparando cambios…");
+    }
+    if lower.contains("building ") || lower.contains("will be built") || lower.contains("compiling") {
+        return Some("Compilando…");
+    }
+    if lower.contains("copying path") || lower.contains("fetching ") || lower.contains("will be fetched") || lower.contains("downloading") {
+        return Some("Descargando…");
+    }
+    if lower.contains("evaluating") || lower.contains("building nixos configuration") || lower.contains("warning: git tree") {
+        return Some("Evaluando…");
+    }
+    None
+}
+
+/// Extrae el nombre de entrada de `• Updated input 'nixpkgs':`.
+pub fn parse_updated_input(line: &str) -> Option<String> {
+    let rest = line.split_once("Updated input '")?.1;
+    let name = rest.split_once('\'')?.0.trim();
+    (!name.is_empty()).then(|| name.to_string())
+}
+
+/// Cuenta cuántos archivos modificados o sin seguir tiene el repo del flake.
+fn git_dirty(flake: &Path) -> usize {
+    if !flake.join(".git").exists() {
+        return 0;
+    }
+    let mut cmd = Command::new("git");
+    cmd.args(["-C", &flake.to_string_lossy(), "status", "--porcelain"]);
+    let Ok(out) = process::output(&mut cmd, b"", Duration::from_secs(2)) else {
+        return 0;
+    };
+    if !out.status.success() {
+        return 0;
+    }
+    String::from_utf8_lossy(&out.stdout).lines().filter(|l| !l.trim().is_empty()).count()
+}
+
+/// Detecta si hay un `nh os switch`, `nixos-rebuild` o `nix flake update` en una terminal externa.
+fn detect_external() -> Option<(String, String)> {
+    let me = std::process::id() as i32;
+    let table = procs::all();
+    for (&pid, stat) in &table {
+        if pid == me || stat.parent == me {
+            continue;
+        }
+        let Ok(bytes) = fs::read(format!("/proc/{pid}/cmdline")) else {
+            continue;
+        };
+        let parts: Vec<String> = bytes.split(|&b| b == 0).filter(|p| !p.is_empty()).map(|p| String::from_utf8_lossy(p).to_string()).collect();
+        if parts.is_empty() {
+            continue;
+        }
+        let cmd = Path::new(&parts[0]).file_name().and_then(|s| s.to_str()).unwrap_or("");
+        let rest = parts[1..].join(" ");
+        if cmd == "nh" && (rest.contains("os switch") || rest.contains("home switch") || rest.contains("os boot")) {
+            return Some(("rebuild".into(), "Reconstruyendo en terminal…".into()));
+        }
+        if cmd == "nixos-rebuild" && (rest.contains("switch") || rest.contains("boot")) {
+            return Some(("rebuild".into(), "Reconstruyendo en terminal…".into()));
+        }
+        if cmd == "nix" && rest.contains("flake") && rest.contains("update") {
+            return Some(("update".into(), "Actualizando flake en terminal…".into()));
+        }
+    }
+    None
+}
+
+/// Estado compartido para el askpass de `sudo` (solo vive en memoria).
+#[derive(Default)]
+pub struct AuthShared {
+    pub token: Option<String>,
+    pub prompt: Option<String>,
+    pub attempt: u32,
+}
+
+impl AuthShared {
+    pub fn snapshot(&self) -> Value {
+        match &self.prompt {
+            Some(prompt) => json!({ "prompt": prompt, "attempt": self.attempt }),
+            None => Value::Null,
+        }
+    }
+}
+
+fn random_token() -> String {
+    let mut bytes = [0u8; 24];
+    let _ = SystemRandom::new().fill(&mut bytes);
+    bytes.iter().map(|b| format!("{b:02x}")).collect()
+}
+
+fn sh_quote(text: &str) -> String {
+    format!("'{}'", text.replace('\'', "'\\''"))
+}
+
+/// Prepara los scripts de elevación (`askpass`, `elevate`, `sudo`) en
+/// `$XDG_RUNTIME_DIR/veyl/nix-bin` con permisos 0700.
+fn prepare_elevation_dir() -> Result<PathBuf, String> {
+    let dir = config::runtime().join("veyl").join("nix-bin");
+    fs::create_dir_all(&dir).map_err(|e| format!("{}: {e}", dir.display()))?;
+    let _ = fs::set_permissions(&dir, fs::Permissions::from_mode(0o700));
+
+    let veyld = std::env::current_exe().map_err(|e| format!("current_exe: {e}"))?;
+    let real_sudo = ["/run/wrappers/bin/sudo", "/usr/bin/sudo", "/bin/sudo"]
+        .into_iter()
+        .map(PathBuf::from)
+        .find(|p| p.is_file())
+        .or_else(|| find_in_path("sudo"))
+        .unwrap_or_else(|| PathBuf::from("sudo"));
+
+    let veyld_q = sh_quote(&veyld.to_string_lossy());
+    let sudo_q = sh_quote(&real_sudo.to_string_lossy());
+
+    let write_script = |name: &str, body: String| -> Result<(), String> {
+        let path = dir.join(name);
+        fs::write(&path, body).map_err(|e| format!("{}: {e}", path.display()))?;
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o700)).map_err(|e| format!("{}: {e}", path.display()))?;
+        Ok(())
+    };
+
+    write_script("askpass", format!("#!/bin/sh\nexec {veyld_q} nix askpass \"$@\"\n"))?;
+    write_script("elevate", format!("#!/bin/sh\nif {sudo_q} -n true 2>/dev/null; then\n  exec {sudo_q} \"$@\"\nfi\nexec {sudo_q} -A \"$@\"\n"))?;
+    write_script(
+        "sudo",
+        format!(
+            "#!/bin/sh\nif [ -n \"${{SUDO_ASKPASS:-}}\" ]; then\n  if {sudo_q} -n true 2>/dev/null; then\n    exec {sudo_q} \"$@\"\n  fi\n  exec {sudo_q} -A \"$@\"\nfi\nexec {sudo_q} \"$@\"\n"
+        ),
+    )?;
+    Ok(dir)
+}
+
+/// `veyld nix askpass`: llamado por `sudo -A`. Pide la contraseña al daemon
+/// por el socket local y la imprime por stdout (nunca en disco ni en logs).
+pub fn askpass_cli(prompt: &str) -> Result<(), String> {
+    let token = std::env::var("VEYL_NIX_AUTH_TOKEN").map_err(|_| "falta VEYL_NIX_AUTH_TOKEN".to_string())?;
+    let path = config::socket();
+    let mut stream = UnixStream::connect(&path).map_err(|_| "veyld no está en marcha".to_string())?;
+    let _ = stream.set_read_timeout(Some(Duration::from_secs(120)));
+    let _ = stream.set_write_timeout(Some(Duration::from_secs(5)));
+    let msg = json!({ "nix_askpass": { "token": token, "prompt": prompt } });
+    writeln!(stream, "{msg}").map_err(|e| e.to_string())?;
+    let _ = stream.flush();
+    let mut line = String::new();
+    BufReader::new(stream).read_line(&mut line).map_err(|e| e.to_string())?;
+    let reply: Value = serde_json::from_str(&line).map_err(|_| "cancelado".to_string())?;
+    if let Some(password) = reply.get("password").and_then(Value::as_str) {
+        println!("{password}");
+        Ok(())
+    } else {
+        Err("cancelado".into())
+    }
+}
+
+/// Órdenes que el daemon manda al hilo de Nix.
+pub enum Job {
+    Refresh,
+    Check,
+    Update { input: Option<String>, then_rebuild: bool },
+    Rebuild,
+    Stop,
+    Dismiss,
+}
+
+#[derive(Clone, Debug, Default)]
+struct JobState {
+    kind: String,  // "" | "update" | "rebuild" | "upgrade"
+    state: String, // "idle" | "running" | "done" | "error"
+    phase: String,
+    since: i64,
+    ended: i64,
+    summary: String,
+    updated: Vec<String>,
+    log: VecDeque<String>,
+    external: bool,
+}
+
+impl JobState {
+    fn to_json(&self) -> Value {
+        if self.state.is_empty() || self.state == "idle" {
+            return Value::Null;
+        }
+        json!({
+            "kind": self.kind,
+            "state": self.state,
+            "phase": self.phase,
+            "since": self.since,
+            "ended": (self.ended > 0).then_some(self.ended),
+            "summary": self.summary,
+            "updated": self.updated,
+            "log": self.log.iter().cloned().collect::<Vec<_>>(),
+            "logFile": log_path().to_string_lossy(),
+            "external": self.external,
+        })
+    }
+}
+
+#[derive(Clone, Debug, Default)]
+struct LocalInfo {
+    nixos: bool,
+    declared: bool,
+    flake: String,
+    flake_name: String,
+    rebuild: String,
+    generation: Option<u32>,
+    version: String,
+    built_at: i64,
+    reboot_needed: bool,
+    dirty: usize,
+    lock_modified: i64,
+    lock_newer: bool,
+    nixpkgs_age: i64,
+    inputs_count: usize,
+}
+
+fn read_local() -> LocalInfo {
+    let manifest = manifest().map(|(_, v)| v);
+    let declared = manifest.is_some();
+    let is_nixos = nixos();
+    let flake = flake_dir(manifest.as_ref());
+    let rebuild = default_rebuild(manifest.as_ref(), flake.as_deref());
+
+    let profile = Path::new("/nix/var/nix/profiles/system");
+    let generation = fs::read_link(profile).ok().and_then(|t| parse_generation_link(&t.to_string_lossy()));
+    let built_at = mtime_ms(profile);
+    let version = fs::read_link("/run/current-system").ok().and_then(|t| parse_system_version(&t.to_string_lossy())).unwrap_or_default();
+    let reboot = if is_nixos { reboot_needed() } else { false };
+
+    let (flake_str, flake_name, dirty, lock_modified, nixpkgs_age, inputs_count) = match &flake {
+        Some(dir) => {
+            let lock = dir.join("flake.lock");
+            let lock_mod = mtime_ms(&lock);
+            let (_, count, np_age) = fs::read_to_string(&lock).map(|t| parse_lock_inputs(&t)).unwrap_or((Vec::new(), 0, 0));
+            (
+                dir.to_string_lossy().to_string(),
+                dir.file_name().and_then(|n| n.to_str()).unwrap_or("flake").to_string(),
+                git_dirty(dir),
+                lock_mod,
+                np_age,
+                count,
+            )
+        }
+        None => (String::new(), String::new(), 0, 0, 0, 0),
+    };
+    let lock_newer = lock_modified > 0 && built_at > 0 && lock_modified > built_at;
+
+    LocalInfo {
+        nixos: is_nixos,
+        declared,
+        flake: flake_str,
+        flake_name,
+        rebuild,
+        generation,
+        version,
+        built_at,
+        reboot_needed: reboot,
+        dirty,
+        lock_modified,
+        lock_newer,
+        nixpkgs_age,
+        inputs_count,
+    }
+}
+
+struct Shared {
+    local: LocalInfo,
+    updates: UpdatesCache,
+    checking: bool,
+    job: JobState,
+}
+
+impl Shared {
+    fn snapshot(&self, auth: &AuthShared) -> Value {
+        json!({
+            "nixos": self.local.nixos,
+            "declared": self.local.declared,
+            "flake": self.local.flake,
+            "flakeName": self.local.flake_name,
+            "rebuild": self.local.rebuild,
+            "generation": self.local.generation,
+            "version": self.local.version,
+            "builtAt": (self.local.built_at > 0).then_some(self.local.built_at),
+            "rebootNeeded": self.local.reboot_needed,
+            "dirty": self.local.dirty,
+            "lockModified": (self.local.lock_modified > 0).then_some(self.local.lock_modified),
+            "lockNewer": self.local.lock_newer,
+            "nixpkgsAge": (self.local.nixpkgs_age > 0).then_some(self.local.nixpkgs_age),
+            "inputsCount": self.local.inputs_count,
+            "checking": self.checking,
+            "checkedAt": (self.updates.checked_at > 0).then_some(self.updates.checked_at),
+            "updates": self.updates.updates,
+            "checkError": self.updates.error,
+            "job": self.job.to_json(),
+            "auth": auth.snapshot(),
+        })
+    }
+}
+
+fn push_snapshot(shared: &Arc<Mutex<Shared>>, auth: &Arc<Mutex<AuthShared>>, tx: &Sender<Event>) {
+    let snap = {
+        let s = shared.lock().unwrap_or_else(|e| e.into_inner());
+        let a = auth.lock().unwrap_or_else(|e| e.into_inner());
+        s.snapshot(&a)
+    };
+    let _ = tx.send(Event::Nix(snap));
+}
+
+fn notify_desktop(summary: &str, body: &str, urgent: bool) {
+    let mut cmd = Command::new("notify-send");
+    cmd.args(["-a", "Veyl", "-i", "nix-snowflake"]);
+    if urgent {
+        cmd.args(["-u", "critical"]);
+    }
+    cmd.args([summary, body]);
+    let _ = cmd.stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null()).spawn();
+}
+
+/// Ejecuta un proceso leyendo stdout y stderr juntos (por líneas y `\r`),
+/// con soporte para pararlo desde fuera y escribir el log completo a disco.
+fn stream_command(
+    command: &mut Command,
+    timeout: Duration,
+    stop: &AtomicBool,
+    log_file: Option<&mut File>,
+    mut on_line: impl FnMut(&str),
+) -> Result<bool, String> {
+    let mut child = command.process_group(0).stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped()).spawn().map_err(|e| e.to_string())?;
+    let pid = child.id();
+    let stdout = child.stdout.take().expect("stdout canalizado");
+    let stderr = child.stderr.take().expect("stderr canalizado");
+
+    let (tx, rx) = mpsc::channel::<String>();
+    let spawn_reader = |mut pipe: Box<dyn Read + Send>, tx: Sender<String>| {
+        thread::spawn(move || {
+            let mut buf = [0u8; 4096];
+            let mut acc = Vec::<u8>::new();
+            while let Ok(n) = pipe.read(&mut buf) {
+                if n == 0 {
+                    break;
+                }
+                for &b in &buf[..n] {
+                    if b == b'\n' || b == b'\r' {
+                        if !acc.is_empty() {
+                            let line = String::from_utf8_lossy(&acc).to_string();
+                            acc.clear();
+                            if tx.send(line).is_err() {
+                                return;
+                            }
+                        }
+                    } else if acc.len() < 4096 {
+                        acc.push(b);
+                    }
+                }
+            }
+            if !acc.is_empty() {
+                let _ = tx.send(String::from_utf8_lossy(&acc).to_string());
+            }
+        })
+    };
+    let t_out = spawn_reader(Box::new(stdout), tx.clone());
+    let t_err = spawn_reader(Box::new(stderr), tx);
+
+    let mut log_file = log_file;
+    let start = Instant::now();
+    let mut open = true;
+    let outcome = loop {
+        if stop.load(Ordering::Relaxed) {
+            break Err("Detenido".to_string());
+        }
+        if start.elapsed() >= timeout {
+            break Err("Tardó demasiado".to_string());
+        }
+        if open {
+            match rx.recv_timeout(Duration::from_millis(40)) {
+                Ok(raw) => {
+                    let clean = strip_ansi(&raw);
+                    if !clean.is_empty() {
+                        if let Some(f) = log_file.as_deref_mut() {
+                            let _ = writeln!(f, "{clean}");
+                        }
+                        on_line(&clean);
+                    }
+                }
+                Err(RecvTimeoutError::Timeout) => {}
+                Err(RecvTimeoutError::Disconnected) => open = false,
+            }
+            continue;
+        }
+        match child.try_wait() {
+            Ok(Some(status)) => break Ok(status.success()),
+            Ok(None) => thread::sleep(Duration::from_millis(20)),
+            Err(e) => break Err(e.to_string()),
+        }
+    };
+    if outcome.is_err() {
+        // SAFETY: el hijo se lanzó en su propio grupo de procesos.
+        unsafe {
+            libc::kill(-(pid as i32), libc::SIGTERM);
+        }
+        thread::sleep(Duration::from_millis(150));
+        unsafe {
+            libc::kill(-(pid as i32), libc::SIGKILL);
+        }
+    }
+    let _ = child.wait();
+    let _ = t_out.join();
+    let _ = t_err.join();
+    outcome
+}
+
+fn run_flake_update(
+    flake: &str,
+    input: Option<&str>,
+    stop: &Arc<AtomicBool>,
+    shared: &Arc<Mutex<Shared>>,
+    auth: &Arc<Mutex<AuthShared>>,
+    tx: &Sender<Event>,
+    log_file: Option<&mut File>,
+) -> Result<Vec<String>, String> {
+    let mut cmd = Command::new("nix");
+    cmd.arg("flake").arg("update");
+    if let Some(name) = input.filter(|s| !s.trim().is_empty()) {
+        cmd.arg(name.trim());
+    }
+    cmd.args(["--flake", flake]).env("NO_COLOR", "1");
+
+    let mut updated = Vec::new();
+    let mut last_push = Instant::now();
+    let ok = stream_command(&mut cmd, JOB_TIMEOUT, stop, log_file, |line| {
+        let mut s = shared.lock().unwrap_or_else(|e| e.into_inner());
+        let mut changed = false;
+        if let Some(name) = parse_updated_input(line)
+            && !updated.contains(&name)
+        {
+            updated.push(name.clone());
+            s.job.updated = updated.clone();
+            s.job.phase = format!("Actualizado {name}");
+            changed = true;
+        } else if let Some(phase) = parse_phase("update", line)
+            && s.job.phase != phase
+        {
+            s.job.phase = phase.to_string();
+            changed = true;
+        }
+        if s.job.log.len() >= LOG_TAIL {
+            s.job.log.pop_front();
+        }
+        s.job.log.push_back(line.chars().take(200).collect());
+        drop(s);
+        if changed || last_push.elapsed() >= Duration::from_millis(250) {
+            last_push = Instant::now();
+            push_snapshot(shared, auth, tx);
+        }
+    })?;
+    if ok { Ok(updated) } else { Err("Falló nix flake update".into()) }
+}
+
+fn run_rebuild(
+    rebuild_cmd: &str,
+    flake: &str,
+    stop: &Arc<AtomicBool>,
+    shared: &Arc<Mutex<Shared>>,
+    auth: &Arc<Mutex<AuthShared>>,
+    tx: &Sender<Event>,
+    log_file: Option<&mut File>,
+) -> Result<(), String> {
+    let bin_dir = prepare_elevation_dir()?;
+    let token = random_token();
+    {
+        let mut a = auth.lock().unwrap_or_else(|e| e.into_inner());
+        a.token = Some(token.clone());
+        a.prompt = None;
+        a.attempt = 0;
+    }
+
+    let current_path = std::env::var("PATH").unwrap_or_default();
+    let path_env = format!("{}:{current_path}", bin_dir.display());
+    let mut cmd = Command::new("sh");
+    cmd.args(["-c", rebuild_cmd])
+        .env("PATH", path_env)
+        .env("SUDO_ASKPASS", bin_dir.join("askpass"))
+        .env("NH_ELEVATION_STRATEGY", bin_dir.join("elevate"))
+        .env("VEYL_NIX_AUTH_TOKEN", &token)
+        .env("NO_COLOR", "1")
+        .env("CLICOLOR", "0");
+    if !flake.is_empty() {
+        cmd.env("NH_FLAKE", flake);
+    }
+
+    let mut last_push = Instant::now();
+    let result = stream_command(&mut cmd, JOB_TIMEOUT, stop, log_file, |line| {
+        let mut s = shared.lock().unwrap_or_else(|e| e.into_inner());
+        let mut changed = false;
+        if let Some(phase) = parse_phase("rebuild", line)
+            && s.job.phase != phase
+        {
+            s.job.phase = phase.to_string();
+            changed = true;
+        }
+        if s.job.log.len() >= LOG_TAIL {
+            s.job.log.pop_front();
+        }
+        s.job.log.push_back(line.chars().take(200).collect());
+        drop(s);
+        if changed || last_push.elapsed() >= Duration::from_millis(250) {
+            last_push = Instant::now();
+            push_snapshot(shared, auth, tx);
+        }
+    });
+
+    {
+        let mut a = auth.lock().unwrap_or_else(|e| e.into_inner());
+        a.token = None;
+        a.prompt = None;
+        a.attempt = 0;
+    }
+    match result {
+        Ok(true) => Ok(()),
+        Ok(false) => Err("Falló la reconstrucción".into()),
+        Err(why) => Err(why),
+    }
+}
+
+/// Hilo de Nix en `veyld`: vigila el sistema y el flake, comprueba actualizaciones
+/// periódicamente y ejecuta `flake update` / `rebuild` en segundo plano.
+pub fn watch(jobs: Receiver<Job>, tx: Sender<Event>, auth: Arc<Mutex<AuthShared>>) {
+    let local = read_local();
+    let cached = (!local.flake.is_empty()).then(|| load_updates_cache(Path::new(&local.flake))).flatten().unwrap_or_default();
+    let relevant = local.nixos || local.declared || !local.flake.is_empty();
+    let shared = Arc::new(Mutex::new(Shared { local, updates: cached, checking: false, job: JobState::default() }));
+    if relevant {
+        push_snapshot(&shared, &auth, &tx);
+    }
+
+    let mut active_stop: Option<Arc<AtomicBool>> = None;
+    let mut last_auto_check = Instant::now().checked_sub(AUTO_CHECK_EVERY - Duration::from_secs(12)).unwrap_or_else(Instant::now);
+
+    let spawn_check = |shared: &Arc<Mutex<Shared>>, auth: &Arc<Mutex<AuthShared>>, tx: &Sender<Event>| {
+        let flake = {
+            let mut s = shared.lock().unwrap_or_else(|e| e.into_inner());
+            if s.checking || s.local.flake.is_empty() {
+                return;
+            }
+            s.checking = true;
+            s.local.flake.clone()
+        };
+        push_snapshot(shared, auth, tx);
+        let shared = Arc::clone(shared);
+        let auth = Arc::clone(auth);
+        let tx = tx.clone();
+        thread::spawn(move || {
+            let res = check_updates(Path::new(&flake));
+            {
+                let mut s = shared.lock().unwrap_or_else(|e| e.into_inner());
+                s.checking = false;
+                match res {
+                    Ok(cache) => s.updates = cache,
+                    Err(why) => s.updates.error = why,
+                }
+            }
+            push_snapshot(&shared, &auth, &tx);
+        });
+    };
+
+    let start_job = |kind: String,
+                     input: Option<String>,
+                     then_rebuild: bool,
+                     active_stop: &mut Option<Arc<AtomicBool>>,
+                     shared: &Arc<Mutex<Shared>>,
+                     auth: &Arc<Mutex<AuthShared>>,
+                     tx: &Sender<Event>| {
+        let (flake, rebuild_cmd) = {
+            let mut s = shared.lock().unwrap_or_else(|e| e.into_inner());
+            if s.job.state == "running" && !s.job.external {
+                return;
+            }
+            s.local = read_local();
+            let flake = s.local.flake.clone();
+            let rebuild = s.local.rebuild.clone();
+            if (kind == "update" || kind == "upgrade") && flake.is_empty() {
+                return;
+            }
+            if (kind == "rebuild" || kind == "upgrade") && rebuild.is_empty() {
+                return;
+            }
+            s.job = JobState {
+                kind: kind.clone(),
+                state: "running".into(),
+                phase: if kind == "rebuild" { "Preparando…".into() } else { "Actualizando flake…".into() },
+                since: now(),
+                ended: 0,
+                summary: String::new(),
+                updated: Vec::new(),
+                log: VecDeque::new(),
+                external: false,
+            };
+            (flake, rebuild)
+        };
+        let stop = Arc::new(AtomicBool::new(false));
+        *active_stop = Some(Arc::clone(&stop));
+        push_snapshot(shared, auth, tx);
+
+        let shared = Arc::clone(shared);
+        let auth = Arc::clone(auth);
+        let tx = tx.clone();
+        thread::spawn(move || {
+            let path = log_path();
+            if let Some(parent) = path.parent() {
+                let _ = fs::create_dir_all(parent);
+            }
+            let mut log_file = File::create(&path).ok();
+            let outcome: Result<String, String> = (|| {
+                let mut updated = Vec::new();
+                if kind == "update" || kind == "upgrade" {
+                    updated = run_flake_update(&flake, input.as_deref(), &stop, &shared, &auth, &tx, log_file.as_mut())?;
+                    // Reconciliamos las actualizaciones enseguida.
+                    {
+                        let mut s = shared.lock().unwrap_or_else(|e| e.into_inner());
+                        s.local = read_local();
+                        reconcile_updates(Path::new(&flake), &mut s.updates);
+                        save_updates_cache(&s.updates);
+                    }
+                    push_snapshot(&shared, &auth, &tx);
+                }
+                if kind == "rebuild" || then_rebuild {
+                    {
+                        let mut s = shared.lock().unwrap_or_else(|e| e.into_inner());
+                        s.job.phase = "Evaluando…".into();
+                    }
+                    push_snapshot(&shared, &auth, &tx);
+                    run_rebuild(&rebuild_cmd, &flake, &stop, &shared, &auth, &tx, log_file.as_mut())?;
+                    let fresh = read_local();
+                    let gen_txt = fresh.generation.map(|g| format!("Generación #{g}")).unwrap_or_else(|| "Sistema reconstruido".into());
+                    Ok(if updated.is_empty() { gen_txt } else { format!("{} actualizadas · {gen_txt}", updated.len()) })
+                } else if updated.is_empty() {
+                    Ok("Flake al día".into())
+                } else if updated.len() == 1 {
+                    Ok(format!("Actualizada {}", updated[0]))
+                } else {
+                    Ok(format!("{} entradas actualizadas", updated.len()))
+                }
+            })();
+
+            let stopped = stop.load(Ordering::Relaxed);
+            let (summary, is_err) = {
+                let mut s = shared.lock().unwrap_or_else(|e| e.into_inner());
+                s.local = read_local();
+                let flake_path = s.local.flake.clone();
+                if !flake_path.is_empty() {
+                    reconcile_updates(Path::new(&flake_path), &mut s.updates);
+                    save_updates_cache(&s.updates);
+                }
+                s.job.ended = now();
+                match outcome {
+                    Ok(summary) => {
+                        s.job.state = "done".into();
+                        s.job.phase = "Completado".into();
+                        s.job.summary = summary.clone();
+                        (summary, false)
+                    }
+                    Err(_) if stopped => {
+                        s.job.state = "idle".into();
+                        s.job.phase.clear();
+                        s.job.summary.clear();
+                        (String::new(), false)
+                    }
+                    Err(why) => {
+                        s.job.state = "error".into();
+                        s.job.phase = "Error".into();
+                        s.job.summary = why.clone();
+                        (why, true)
+                    }
+                }
+            };
+            push_snapshot(&shared, &auth, &tx);
+            if !summary.is_empty() {
+                let title = if is_err {
+                    if kind == "update" { "Error al actualizar flake" } else { "Error al reconstruir NixOS" }
+                } else if kind == "update" {
+                    "Flake actualizado"
+                } else {
+                    "NixOS reconstruido"
+                };
+                notify_desktop(title, &summary, is_err);
+            }
+        });
+    };
+
+    loop {
+        match jobs.recv_timeout(LOCAL_POLL_EVERY) {
+            Ok(Job::Refresh) => {
+                let fresh = read_local();
+                {
+                    let mut s = shared.lock().unwrap_or_else(|e| e.into_inner());
+                    s.local = fresh;
+                    let flake_path = s.local.flake.clone();
+                    if !flake_path.is_empty() {
+                        reconcile_updates(Path::new(&flake_path), &mut s.updates);
+                    }
+                }
+                push_snapshot(&shared, &auth, &tx);
+            }
+            Ok(Job::Check) => {
+                last_auto_check = Instant::now();
+                spawn_check(&shared, &auth, &tx);
+            }
+            Ok(Job::Update { input, then_rebuild }) => {
+                let kind = if then_rebuild { "upgrade" } else { "update" }.to_string();
+                start_job(kind, input, then_rebuild, &mut active_stop, &shared, &auth, &tx);
+            }
+            Ok(Job::Rebuild) => {
+                start_job("rebuild".into(), None, false, &mut active_stop, &shared, &auth, &tx);
+            }
+            Ok(Job::Stop) => {
+                if let Some(stop) = active_stop.take() {
+                    stop.store(true, Ordering::Relaxed);
+                }
+            }
+            Ok(Job::Dismiss) => {
+                let mut s = shared.lock().unwrap_or_else(|e| e.into_inner());
+                if s.job.state == "done" || s.job.state == "error" {
+                    s.job = JobState::default();
+                }
+                drop(s);
+                push_snapshot(&shared, &auth, &tx);
+            }
+            Err(RecvTimeoutError::Timeout) => {
+                let fresh = read_local();
+                let is_relevant = fresh.nixos || fresh.declared || !fresh.flake.is_empty();
+                if !is_relevant {
+                    continue;
+                }
+                let mut changed = false;
+                let mut should_auto_check = false;
+                {
+                    let mut s = shared.lock().unwrap_or_else(|e| e.into_inner());
+                    let prev_gen = s.local.generation;
+                    let prev_dirty = s.local.dirty;
+                    let prev_lock = s.local.lock_modified;
+                    let prev_reboot = s.local.reboot_needed;
+                    let prev_flake = s.local.flake.clone();
+                    s.local = fresh;
+                    let flake_path = s.local.flake.clone();
+                    if !flake_path.is_empty() {
+                        let before_u = s.updates.updates.len();
+                        reconcile_updates(Path::new(&flake_path), &mut s.updates);
+                        if s.updates.updates.len() != before_u {
+                            save_updates_cache(&s.updates);
+                            changed = true;
+                        }
+                    }
+                    if s.local.generation != prev_gen
+                        || s.local.dirty != prev_dirty
+                        || s.local.lock_modified != prev_lock
+                        || s.local.reboot_needed != prev_reboot
+                        || s.local.flake != prev_flake
+                    {
+                        changed = true;
+                    }
+                    // Detecta rebuilds o flake update lanzados en una terminal aparte.
+                    if s.job.state != "running" || s.job.external {
+                        match detect_external() {
+                            Some((kind, phase)) => {
+                                if !s.job.external || s.job.kind != kind {
+                                    s.job = JobState {
+                                        kind,
+                                        state: "running".into(),
+                                        phase,
+                                        since: now(),
+                                        ended: 0,
+                                        summary: String::new(),
+                                        updated: Vec::new(),
+                                        log: VecDeque::new(),
+                                        external: true,
+                                    };
+                                    changed = true;
+                                }
+                            }
+                            None if s.job.external => {
+                                s.job = JobState::default();
+                                changed = true;
+                            }
+                            None => {}
+                        }
+                    }
+                    let cache_stale = s.updates.checked_at == 0 || (now() - s.updates.checked_at) >= AUTO_CHECK_EVERY.as_millis() as i64;
+                    if !s.local.flake.is_empty() && !s.checking && cache_stale && last_auto_check.elapsed() >= AUTO_CHECK_EVERY {
+                        should_auto_check = true;
+                    }
+                }
+                if changed {
+                    push_snapshot(&shared, &auth, &tx);
+                }
+                if should_auto_check {
+                    last_auto_check = Instant::now();
+                    spawn_check(&shared, &auth, &tx);
+                }
+            }
+            Err(RecvTimeoutError::Disconnected) => break,
+        }
     }
 }
 
@@ -683,5 +1898,75 @@ mod tests {
         let scheme_change = Change { path: vec!["scheme".into()], value: Some(json!("b")) };
         assert!(affinity(host, None, &mon_change) > affinity(shared, Some(&scope), &mon_change));
         assert!(affinity(shared, Some(&scope), &scheme_change) > affinity(host, None, &scheme_change));
+    }
+
+    #[test]
+    fn lee_generacion_y_version_del_sistema() {
+        assert_eq!(parse_generation_link("system-827-link"), Some(827));
+        assert_eq!(parse_generation_link("/nix/var/nix/profiles/system-42-link"), Some(42));
+        assert_eq!(parse_generation_link("system-abc-link"), None);
+        assert_eq!(
+            parse_system_version("/nix/store/igh3z6ipdzjzshhnsxkrajgaigi4v8df-nixos-system-nixos-pc-26.11.20261121.2786a2a"),
+            Some("26.11.20261121".into())
+        );
+        assert_eq!(parse_system_version("/nix/store/abc-nixos-system-my-host-25.05.12345"), Some("25.05.12345".into()));
+    }
+
+    #[test]
+    fn lee_entradas_flotantes_del_flake_lock() {
+        let lock = r#"{
+          "root": "root",
+          "nodes": {
+            "root": {
+              "inputs": {
+                "nixpkgs": "nixpkgs",
+                "hyprland": "hyprland",
+                "herdr": "herdr",
+                "veyl": "veyl"
+              }
+            },
+            "nixpkgs": {
+              "original": { "type": "github", "owner": "nixos", "repo": "nixpkgs", "ref": "nixos-unstable" },
+              "locked": { "rev": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "lastModified": 1700000000 }
+            },
+            "hyprland": {
+              "original": { "type": "github", "owner": "hyprwm", "repo": "Hyprland", "rev": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb" },
+              "locked": { "rev": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "lastModified": 1700000001 }
+            },
+            "herdr": {
+              "original": { "type": "github", "owner": "herdrdev", "repo": "herdr", "ref": "v0.9.3" },
+              "locked": { "rev": "cccccccccccccccccccccccccccccccccccccccc", "lastModified": 1700000002 }
+            },
+            "veyl": {
+              "original": { "type": "github", "owner": "ElliotLuque", "repo": "veyl" },
+              "locked": { "rev": "dddddddddddddddddddddddddddddddddddddddd", "lastModified": 1700000003 }
+            }
+          }
+        }"#;
+        let (inputs, total, nixpkgs_age) = parse_lock_inputs(lock);
+        assert_eq!(total, 4);
+        assert_eq!(nixpkgs_age, 1_700_000_000_000);
+        // hyprland está fijado por `rev`, no flota.
+        assert!(!inputs.iter().any(|i| i.name == "hyprland"));
+        let np = inputs.iter().find(|i| i.name == "nixpkgs").unwrap();
+        assert_eq!(np.url, "https://github.com/nixos/nixpkgs.git");
+        assert_eq!(np.refspec, "refs/heads/nixos-unstable");
+        let veyl = inputs.iter().find(|i| i.name == "veyl").unwrap();
+        assert_eq!(veyl.refspec, "HEAD");
+        // herdr consulta refs/heads/v0.9.3, que no coincide con etiquetas fijas.
+        let herdr = inputs.iter().find(|i| i.name == "herdr").unwrap();
+        assert_eq!(herdr.refspec, "refs/heads/v0.9.3");
+    }
+
+    #[test]
+    fn limpia_ansi_y_reconoce_fases_de_nix() {
+        assert_eq!(strip_ansi("\x1b[32m• Updated input 'nixpkgs':\x1b[0m"), "• Updated input 'nixpkgs':");
+        assert_eq!(strip_ansi("viejo\rnuevo paso"), "nuevo paso");
+        assert_eq!(parse_updated_input("• Updated input 'home-manager':"), Some("home-manager".into()));
+        assert_eq!(parse_phase("rebuild", "evaluating derivation"), Some("Evaluando…"));
+        assert_eq!(parse_phase("rebuild", "copying path '/nix/store/foo'"), Some("Descargando…"));
+        assert_eq!(parse_phase("rebuild", "building '/nix/store/bar.drv'"), Some("Compilando…"));
+        assert_eq!(parse_phase("rebuild", "Comparing changes"), Some("Comparando cambios…"));
+        assert_eq!(parse_phase("rebuild", "activating the configuration..."), Some("Activando…"));
     }
 }

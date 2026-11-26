@@ -74,8 +74,9 @@ const USAGE: &str = "uso:
                              la cuenta de Google y sus calendarios; login la conecta (abre
                              el navegador), con el cliente de Veyl o con uno tuyo
   veyld grammar              comprueba la gramática (la de fábrica y ~/.config/veyl/grammar.txt)
-  veyld nix [status | write <cambios> | show <ajustes>]
+  veyld nix [status | write <cambios> | show <ajustes> | check | askpass]
                              Veyl en tu configuración de Nix: dónde está programs.veyl,
+                             comprobar actualizaciones del flake y soporte de reconstrucción
                              escribir en ella lo cambiado en los ajustes (JSON: [{path, value}])
                              o cómo se escribirían unos ajustes";
 

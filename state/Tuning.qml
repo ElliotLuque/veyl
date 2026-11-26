@@ -36,7 +36,7 @@ Singleton {
         { id: "voice", title: "Voz", glyph: "waveform" },
         { id: "journal", title: "Diario y órdenes", glyph: "notebook" },
         { id: "session", title: "Sesión y energía", glyph: "power" },
-        { id: "nix", title: "Nix", glyph: "snowflake", when: Nix.active },
+        { id: "nix", title: "Nix", glyph: "snowflake", when: Nix.systemActive },
         { id: "about", title: "Sistema", glyph: "info" }
     ].filter(section => section.when ?? true)
     readonly property var current: sections.find(section => section.id === root.section) ?? sections[0]

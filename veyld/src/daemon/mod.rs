@@ -61,9 +61,9 @@ use std::os::unix::fs::PermissionsExt;
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::PathBuf;
 use std::process::Command;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, RecvTimeoutError, Sender};
+use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
@@ -82,6 +82,7 @@ use crate::hypr::{Hypr, Window};
 use crate::idle;
 use crate::journal::{self, Journal, Seen};
 use crate::media::{self, Playing};
+use crate::nix;
 use crate::notes::{Notes, Out};
 use crate::orders::{self, Outcome};
 use crate::procs;
@@ -166,6 +167,8 @@ pub enum Event {
     },
     /// Lo que cuentan los calendarios (lo apuntado, lo borrado, la cuenta), para Veyl.
     Calendar(Value),
+    /// Estado de NixOS / flake / rebuild en vivo, para Veyl.
+    Nix(Value),
     Reload,
     Stop,
 }
@@ -269,6 +272,11 @@ pub struct Daemon {
     pub views: Views,
     /// El hilo que trae los calendarios de fuera: se le despierta para que lo haga ya.
     calendars: Option<Sender<calendars::Job>>,
+    /// El hilo de NixOS / flakes y su último estado conocido.
+    nix_jobs: Option<Sender<nix::Job>>,
+    nix_state: Value,
+    nix_auth: Arc<Mutex<nix::AuthShared>>,
+    nix_askpass: Option<u64>,
 }
 
 /// Un reloj del sistema, en ms. CLOCK_BOOTTIME cuenta lo dormido; CLOCK_MONOTONIC, no.
@@ -360,6 +368,10 @@ impl Daemon {
             cover: None,
             views: Views::load(),
             calendars: None,
+            nix_jobs: None,
+            nix_state: Value::Null,
+            nix_auth: Arc::new(Mutex::new(nix::AuthShared::default())),
+            nix_askpass: None,
         };
         daemon.recall_talk();
         daemon
@@ -564,6 +576,10 @@ impl Daemon {
             self.send(client, &views);
             let awake = self.awake();
             self.send(client, &awake);
+            if !self.nix_state.is_null() {
+                let state = json!({ "nix": self.nix_state });
+                self.send(client, &state);
+            }
         }
         if text("watch").as_deref() == Some("agents") {
             if let Some(c) = self.clients.get_mut(&client) {
@@ -782,6 +798,116 @@ impl Daemon {
         if let Some(on) = message.get("hold").and_then(Value::as_bool) {
             self.notes.hold(on, Instant::now());
         }
+        // Nix: consultar estado, comprobar actualizaciones, actualizar flake, reconstruir o responder a sudo.
+        if let Some(req) = message.get("nix") {
+            let op = req.get("op").and_then(Value::as_str).unwrap_or("");
+            match op {
+                "status" => {
+                    self.send(client, &json!({ "id": id, "nix": self.nix_state }));
+                }
+                "refresh" => {
+                    if let Some(jobs) = &self.nix_jobs {
+                        let _ = jobs.send(nix::Job::Refresh);
+                    }
+                }
+                "check" => {
+                    if let Some(jobs) = &self.nix_jobs {
+                        let _ = jobs.send(nix::Job::Check);
+                    }
+                }
+                "update" => {
+                    let input = req.get("input").and_then(Value::as_str).map(str::trim).filter(|s| !s.is_empty()).map(str::to_string);
+                    if let Some(jobs) = &self.nix_jobs {
+                        let _ = jobs.send(nix::Job::Update { input, then_rebuild: false });
+                    }
+                }
+                "upgrade" => {
+                    if let Some(jobs) = &self.nix_jobs {
+                        let _ = jobs.send(nix::Job::Update { input: None, then_rebuild: true });
+                    }
+                }
+                "rebuild" => {
+                    if let Some(jobs) = &self.nix_jobs {
+                        let _ = jobs.send(nix::Job::Rebuild);
+                    }
+                }
+                "stop" => {
+                    self.cancel_nix_askpass();
+                    if let Some(jobs) = &self.nix_jobs {
+                        let _ = jobs.send(nix::Job::Stop);
+                    }
+                }
+                "dismiss" => {
+                    if let Some(jobs) = &self.nix_jobs {
+                        let _ = jobs.send(nix::Job::Dismiss);
+                    }
+                }
+                "auth" => {
+                    let password = req.get("password").and_then(Value::as_str).unwrap_or("");
+                    if let Some(waiter) = self.nix_askpass.take() {
+                        self.send(waiter, &json!({ "password": password }));
+                    }
+                    {
+                        let mut a = self.nix_auth.lock().unwrap_or_else(|e| e.into_inner());
+                        a.prompt = None;
+                    }
+                    if self.nix_state.is_object() {
+                        self.nix_state["auth"] = Value::Null;
+                        let msg = json!({ "nix": self.nix_state });
+                        self.broadcast(&msg, |c| c.shell);
+                    }
+                }
+                "auth_cancel" => {
+                    self.cancel_nix_askpass();
+                }
+                _ => {}
+            }
+        }
+        // `veyld nix askpass` espera aquí a que el usuario escriba su contraseña en Veyl.
+        if let Some(askpass) = message.get("nix_askpass") {
+            let token = askpass.get("token").and_then(Value::as_str).unwrap_or("");
+            let prompt = askpass.get("prompt").and_then(Value::as_str).unwrap_or("Contraseña de sudo");
+            let auth_snap = {
+                let mut a = self.nix_auth.lock().unwrap_or_else(|e| e.into_inner());
+                if a.token.as_deref() == Some(token) && !token.is_empty() {
+                    a.attempt += 1;
+                    a.prompt = Some(prompt.to_string());
+                    Some(a.snapshot())
+                } else {
+                    None
+                }
+            };
+            match auth_snap {
+                Some(snap) => {
+                    if let Some(prev) = self.nix_askpass.replace(client) {
+                        self.send(prev, &json!({ "cancel": true }));
+                    }
+                    if self.nix_state.is_object() {
+                        self.nix_state["auth"] = snap;
+                        let msg = json!({ "nix": self.nix_state });
+                        self.broadcast(&msg, |c| c.shell);
+                    }
+                }
+                None => {
+                    self.send(client, &json!({ "cancel": true }));
+                }
+            }
+        }
+    }
+
+    fn cancel_nix_askpass(&mut self) {
+        if let Some(waiter) = self.nix_askpass.take() {
+            self.send(waiter, &json!({ "cancel": true }));
+        }
+        {
+            let mut a = self.nix_auth.lock().unwrap_or_else(|e| e.into_inner());
+            a.prompt = None;
+        }
+        if self.nix_state.is_object() {
+            self.nix_state["auth"] = Value::Null;
+            let msg = json!({ "nix": self.nix_state });
+            self.broadcast(&msg, |c| c.shell);
+        }
     }
 
     /// Lo que haces con una notificación desde Veyl.
@@ -851,6 +977,18 @@ impl Daemon {
             }
             Event::Said(id, message) => self.message(id, message),
             Event::Left(id) => {
+                if self.nix_askpass == Some(id) {
+                    self.nix_askpass = None;
+                    {
+                        let mut a = self.nix_auth.lock().unwrap_or_else(|e| e.into_inner());
+                        a.prompt = None;
+                    }
+                    if self.nix_state.is_object() {
+                        self.nix_state["auth"] = Value::Null;
+                        let msg = json!({ "nix": self.nix_state });
+                        self.broadcast(&msg, |c| c.shell);
+                    }
+                }
                 let was_shell = self.clients.remove(&id).is_some_and(|c| c.shell);
                 // Sin Veyl no hay puntero encima de nada.
                 if was_shell && !self.clients.values().any(|c| c.shell) {
@@ -907,6 +1045,20 @@ impl Daemon {
                 if !told.is_null() {
                     self.broadcast(&json!({ "calendar": told }), |c| c.shell);
                 }
+            }
+            Event::Nix(mut state) => {
+                // Si el trabajo terminó sin responder a un askpass abierto, lo cancelamos.
+                let running = state.pointer("/job/state").and_then(Value::as_str) == Some("running");
+                if !running && let Some(waiter) = self.nix_askpass.take() {
+                    self.send(waiter, &json!({ "cancel": true }));
+                }
+                if state.is_object() {
+                    let auth = self.nix_auth.lock().unwrap_or_else(|e| e.into_inner()).snapshot();
+                    state["auth"] = auth;
+                }
+                self.nix_state = state;
+                let msg = json!({ "nix": self.nix_state });
+                self.broadcast(&msg, |c| c.shell);
             }
             Event::Reload => {
                 let (grammar, error) = grammar();
@@ -1091,6 +1243,13 @@ pub fn run() -> Result<(), String> {
         let tx = tx.clone();
         thread::spawn(move || calendars::watch(taken, tx));
         daemon.calendars = Some(jobs);
+    }
+    {
+        let (jobs, taken) = mpsc::channel();
+        let tx = tx.clone();
+        let auth = Arc::clone(&daemon.nix_auth);
+        thread::spawn(move || nix::watch(taken, tx, auth));
+        daemon.nix_jobs = Some(jobs);
     }
     daemon.ear = Some(voice::spawn(tx.clone()));
     daemon.mouth = Some(tts::spawn());
