@@ -25,8 +25,8 @@ Singleton {
     // Lo que cuenta veyld: { nixos, declared, file, files, error, rebuild }.
     property var status: ({})
     readonly property bool nixos: status.nixos === true
-    // Si hay que enseñar algo de Nix: en NixOS, o con Veyl declarado.
-    readonly property bool active: nixos || declared
+    // Solo se enseña Nix (sección, insignia y pie) si Veyl está declarado con su módulo.
+    readonly property bool active: declared
     readonly property string file: status.file ?? ""
     readonly property var files: status.files ?? (file ? [file] : [])
     readonly property string problem: status.error ?? ""
@@ -212,9 +212,14 @@ Singleton {
         Host.ask(["sh", "-c", 'bin=$(command -v veyld || echo "$1/veyld/target/release/veyld"); shift; exec "$bin" nix "$@"', "sh", Quickshell.shellDir].concat(args), done);
     }
 
-    function refresh(): void {
-        home.reload();
-        etc.reload();
+    onDeclaredChanged: {
+        if (declared)
+            queryStatus();
+        else
+            status = {};
+    }
+
+    function queryStatus(): void {
         veyld(["status"], text => {
             try {
                 root.status = JSON.parse(text);
@@ -222,6 +227,15 @@ Singleton {
                 root.status = {};
             }
         });
+    }
+
+    function refresh(): void {
+        home.reload();
+        etc.reload();
+        if (declared)
+            queryStatus();
+        else
+            status = {};
     }
 
     // Escribe en tu configuración lo de estos grupos.

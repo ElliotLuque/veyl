@@ -176,8 +176,8 @@ Singleton {
         }
 
         // Abre una sección: look, sound, screens, network, bluetooth, input,
-        // alerts, calendars, voice, journal, session, nix (en NixOS o con Veyl
-        // declarado en Nix) o about.
+        // alerts, calendars, voice, journal, session, nix (solo si Veyl está
+        // declarado con su módulo de Nix) o about.
         function open(section: string): string {
             if (section && !root.sections.some(other => other.id === section))
                 return `no existe la sección ${section}`;

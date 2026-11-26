@@ -133,7 +133,7 @@ FocusScope {
                     Rectangle {
                         id: badge
 
-                        readonly property int count: entry.modelData.id === "nix" ? Nix.drift.length : 0
+                        readonly property int count: entry.modelData.id === "nix" && Nix.active ? Nix.drift.length : 0
 
                         anchors.right: parent.right
                         anchors.rightMargin: 10
@@ -282,7 +282,7 @@ FocusScope {
 
             readonly property bool failed: Nix.failure !== ""
             readonly property bool pendingSave: Nix.unsaved.length > 0
-            readonly property bool pendingBuild: Nix.declared && !pendingSave && Nix.unbuilt.length > 0
+            readonly property bool pendingBuild: !pendingSave && Nix.unbuilt.length > 0
             readonly property bool shown: Nix.active && Tuning.current?.id !== "nix" && (failed || pendingSave || pendingBuild)
             readonly property int unsavedCount: Nix.unsaved.length
             readonly property int unbuiltCount: Nix.unbuilt.length
@@ -322,8 +322,6 @@ FocusScope {
                     if (drift.failed)
                         return Nix.failure;
                     if (drift.pendingSave) {
-                        if (!Nix.declared)
-                            return drift.unsavedCount === 1 ? `${Nix.unsaved[0].title} · cambio sin declarar en Nix` : `${drift.unsavedCount} cambios sin declarar en Nix`;
                         const extra = drift.unbuiltCount > 0 ? ` (+${drift.unbuiltCount} por reconstruir)` : "";
                         return drift.unsavedCount === 1 ? `${Nix.unsaved[0].title} · cambio por aplicar en Nix${extra}` : `${drift.unsavedCount} cambios por aplicar en Nix${extra}`;
                     }
@@ -344,7 +342,7 @@ FocusScope {
                 Button {
                     icon: "arrow-counter-clockwise"
                     text: "Deshacer"
-                    visible: Nix.declared && drift.pendingSave && !drift.failed
+                    visible: drift.pendingSave && !drift.failed
                     onPressed: Nix.revertAll()
                 }
 
@@ -367,16 +365,8 @@ FocusScope {
                     icon: "floppy-disk"
                     text: Nix.busy ? "Guardando…" : "Guardar en Nix"
                     strong: true
-                    visible: Nix.declared && drift.pendingSave && !drift.failed && Nix.file !== ""
+                    visible: drift.pendingSave && !drift.failed && Nix.file !== ""
                     onPressed: Nix.save(Nix.unsaved)
-                }
-
-                Button {
-                    icon: "copy"
-                    text: "Copiar como Nix"
-                    strong: true
-                    visible: !Nix.declared && drift.pendingSave && !drift.failed
-                    onPressed: Nix.copy()
                 }
 
                 Button {
